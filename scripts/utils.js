@@ -44,8 +44,9 @@ export function createCueController({
   scopeEl,
   selector = "[data-hero-cue]",
   stageName = "",
+  gsap = window.gsap,
 } = {}) {
-  if (!scopeEl) {
+  if (!scopeEl || !gsap) {
     return {
       update() {},
       destroy() {},
@@ -64,41 +65,61 @@ export function createCueController({
     start: parseCueFloat(el.dataset.cueStart, 0),
     end: parseCueFloat(el.dataset.cueEnd, 1),
     once: el.dataset.cueOnce === "true",
-    hasActivated: false,
+    intro: parseCueFloat(el.dataset.cueIntro, 0.25),
+    outro: parseCueFloat(el.dataset.cueOutro, 0.75),
+    yFrom: Number.parseFloat(el.dataset.cueY) || 28,
+    ease: gsap.parseEase(el.dataset.cueEase || "power2.out"),
+    maxProgress: 0,
   }));
+
+  cues.forEach((cue) => {
+    gsap.set(cue.el, {
+      autoAlpha: 0,
+      y: cue.yFrom,
+      willChange: "opacity, transform",
+    });
+  });
+
+  function cueMix(cue, progress) {
+    const p = clamp(progress, 0, 1);
+    const fadeInEnd = Math.max(0.001, cue.intro);
+    const fadeOutStart = Math.min(0.999, Math.max(cue.intro, cue.outro));
+
+    if (p <= fadeInEnd) {
+      return cue.ease(normalizeRange(p, 0, fadeInEnd));
+    }
+    if (p >= fadeOutStart) {
+      return cue.ease(1 - normalizeRange(p, fadeOutStart, 1));
+    }
+    return 1;
+  }
 
   function update(progress) {
     const p = clamp(progress, 0, 1);
     cues.forEach((cue) => {
-      const isActive = p >= cue.start && p <= cue.end;
-      const isPast = p > cue.end;
+      const localProgress = normalizeRange(p, cue.start, cue.end);
+      cue.maxProgress = Math.max(cue.maxProgress, localProgress);
 
-      if (cue.once && cue.hasActivated) {
-        cue.el.classList.remove("is-active");
-        cue.el.classList.add("is-past");
-        cue.el.setAttribute("data-cue-state", "past");
-        return;
+      let animatedProgress = localProgress;
+      if (cue.once && cue.maxProgress >= 1) {
+        animatedProgress = 1;
       }
 
-      cue.el.classList.toggle("is-active", isActive);
-      cue.el.classList.toggle("is-past", isPast);
-      cue.el.classList.toggle("is-future", !isActive && !isPast);
+      const mix = cueMix(cue, animatedProgress);
+      gsap.set(cue.el, {
+        autoAlpha: mix,
+        y: (1 - mix) * cue.yFrom,
+      });
 
-      if (isActive) {
-        cue.hasActivated = true;
-        cue.el.setAttribute("data-cue-state", "active");
-      } else if (isPast) {
-        cue.el.setAttribute("data-cue-state", "past");
-      } else {
-        cue.el.setAttribute("data-cue-state", "future");
-      }
+      cue.el.style.pointerEvents = mix > 0.98 ? "" : "none";
     });
   }
 
   function destroy() {
     cues.forEach((cue) => {
-      cue.el.classList.remove("is-active", "is-past", "is-future");
-      cue.el.removeAttribute("data-cue-state");
+      gsap.set(cue.el, {
+        clearProps: "autoAlpha,opacity,visibility,transform,willChange,pointerEvents",
+      });
     });
   }
 
