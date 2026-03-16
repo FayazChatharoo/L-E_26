@@ -130,7 +130,7 @@ export function createCueAnimationState({
     Math.max(0.03, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
   );
 
-  const ease = cueEl.dataset.cueEase || "power3.out";
+  const ease = cueEl.dataset.cueEase || "power4.inOut";
 
   setInitialState({ gsap, words, yOffset });
 
