@@ -54,29 +54,44 @@ export function createCueController({
     };
   }
 
+  const SplitText =
+    window.SplitText ||
+    (typeof gsap.core !== "undefined" && gsap.core.globals
+      ? gsap.core.globals().SplitText
+      : null);
+
   const nodes = Array.from(scopeEl.querySelectorAll(selector)).filter((el) => {
     const cueStage = el.dataset.cueStage;
     return !cueStage || cueStage === stageName;
   });
 
-  const cues = nodes.map((el) => ({
-    el,
-    id: el.dataset.cueId || "",
-    start: parseCueFloat(el.dataset.cueStart, 0),
-    end: parseCueFloat(el.dataset.cueEnd, 1),
-    once: el.dataset.cueOnce === "true",
-    intro: parseCueFloat(el.dataset.cueIntro, 0.25),
-    outro: parseCueFloat(el.dataset.cueOutro, 0.75),
-    yFrom: Number.parseFloat(el.dataset.cueY) || 28,
-    ease: gsap.parseEase(el.dataset.cueEase || "power2.out"),
-    maxProgress: 0,
-  }));
+  const cues = nodes.map((el) => {
+    const split = SplitText ? new SplitText(el, { type: "chars" }) : null;
+    const chars = split?.chars?.length ? split.chars : [el];
+
+    return {
+      el,
+      split,
+      chars,
+      id: el.dataset.cueId || "",
+      start: parseCueFloat(el.dataset.cueStart, 0),
+      end: parseCueFloat(el.dataset.cueEnd, 1),
+      once: el.dataset.cueOnce === "true",
+      intro: parseCueFloat(el.dataset.cueIntro, 0.12),
+      outro: parseCueFloat(el.dataset.cueOutro, 0.88),
+      yFrom: Number.parseFloat(el.dataset.cueY) || 18,
+      stagger: clamp(Number.parseFloat(el.dataset.cueStagger) || 0.03, 0.02, 0.04),
+      ease: gsap.parseEase(el.dataset.cueEase || "power3.out"),
+      maxProgress: 0,
+    };
+  });
 
   cues.forEach((cue) => {
-    gsap.set(cue.el, {
-      autoAlpha: 0,
+    gsap.set(cue.chars, {
+      opacity: 0,
       y: cue.yFrom,
-      willChange: "opacity, transform",
+      color: "#FF9D29",
+      willChange: "opacity, transform, color",
     });
   });
 
@@ -106,9 +121,20 @@ export function createCueController({
       }
 
       const mix = cueMix(cue, animatedProgress);
-      gsap.set(cue.el, {
-        autoAlpha: mix,
-        y: (1 - mix) * cue.yFrom,
+      const totalStagger = Math.max(0, (cue.chars.length - 1) * cue.stagger);
+      const usableSpan = Math.max(0.001, 1 - totalStagger);
+      const baseColor = "#FF9D29";
+      const finalColor = "#FFFFFF";
+
+      cue.chars.forEach((charEl, index) => {
+        const startOffset = index * cue.stagger;
+        const charProgress = clamp((mix - startOffset) / usableSpan, 0, 1);
+        const eased = cue.ease(charProgress);
+        gsap.set(charEl, {
+          opacity: eased,
+          y: (1 - eased) * cue.yFrom,
+          color: gsap.utils.interpolate(baseColor, finalColor, eased),
+        });
       });
 
       cue.el.style.pointerEvents = mix > 0.98 ? "" : "none";
@@ -117,9 +143,11 @@ export function createCueController({
 
   function destroy() {
     cues.forEach((cue) => {
-      gsap.set(cue.el, {
-        clearProps: "autoAlpha,opacity,visibility,transform,willChange,pointerEvents",
+      gsap.set(cue.chars, {
+        clearProps: "opacity,transform,color,willChange",
       });
+      cue.split?.revert();
+      cue.el.style.pointerEvents = "";
     });
   }
 
