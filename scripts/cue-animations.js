@@ -87,10 +87,13 @@ function createSpecialTimeline({ gsap, cueEl, words, stagger, ease }) {
 // - or data-cue-number="4"
 function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
   const timeline = gsap.timeline({ paused: true });
+  timeline.set(words, {
+    opacity: 1});
   timeline.to(words, {
     opacity: 1,
     y: 0,
     color: ORANGE,
+    filter: "blur(0px)",
     duration: 0.56,
     ease,
     stagger,
