@@ -87,8 +87,6 @@ function createSpecialTimeline({ gsap, cueEl, words, stagger, ease }) {
 // - or data-cue-number="4"
 function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
   const timeline = gsap.timeline({ paused: true });
-  timeline.set(words, {
-    opacity: 1});
   timeline.to(words, {
     opacity: 1,
     y: 0,
@@ -126,9 +124,7 @@ export function createCueAnimationState({
   const yOffset = Number.parseFloat(cueEl.dataset.cueY) || 14;
 
   // Word stagger is intentionally small so reveals stay premium but finish quickly.
-  const stagger = Math.min(
-    0.06,
-    Math.max(0.03, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
+  const stagger = Math.min(0.06, Math.max(0.03, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
   );
 
   const ease = cueEl.dataset.cueEase || "expo.inOut";
@@ -137,9 +133,9 @@ export function createCueAnimationState({
 
   if (cueType === "cue4") {
     gsap.set(words, {
-      filter: "blur(5px)",
-      scale: 0.97,
-      willChange: "opacity, transform, color, filter",
+      opacity: 1,
+      color: WHITE,
+      willChange: "opacity, color",
     });
   }
 
