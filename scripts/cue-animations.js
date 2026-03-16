@@ -45,7 +45,7 @@ function createDefaultTimeline({ gsap, words, stagger, ease }) {
     opacity: 1,
     y: 0,
     color: WHITE,
-    duration: 0.42,
+    duration: 1,
     ease,
     stagger,
   });
@@ -91,8 +91,6 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
     opacity: 1,
     y: 0,
     color: ORANGE,
-    filter: "blur(0px)",
-    scale: 1.4,
     duration: 0.56,
     ease,
     stagger,
@@ -101,7 +99,7 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
     cueEl,
     { letterSpacing: "var(--letter-spacing--heading-1)" },
     {
-      letterSpacing: "0.1em",
+      letterSpacing: "var(--letter-spacing--heading-1)",
       duration: 0.22,
       ease: "sine.out",
       yoyo: true,
@@ -130,7 +128,7 @@ export function createCueAnimationState({
     Math.max(0.03, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
   );
 
-  const ease = cueEl.dataset.cueEase || "power4.inOut";
+  const ease = cueEl.dataset.cueEase || "expo.inOut";
 
   setInitialState({ gsap, words, yOffset });
 
