@@ -9,7 +9,7 @@
   - The cue controller detects when a cue enters or leaves its
     data-cue-start/data-cue-end window.
   - On enter: it calls a "play..." function from this file.
-  - On leave: it calls "hideCueAnimation(...)"
+  - On leave: it calls "hideCueAnimation(...)".
 
   Where to modify animations later:
   - Edit the timeline setup inside:
@@ -18,17 +18,18 @@
     - createCue4Timeline()
 */
 
-const ORANGE = "#FF0000";
+const ORANGE = "#FF9D29";
 const WHITE = "#FFFFFF";
 
 function getSplitTargets({ cueEl, SplitText }) {
-  const splitInstance = SplitText ? new SplitText(cueEl, { type: "chars" }) : null;
-  const characters = splitInstance?.chars?.length ? splitInstance.chars : [cueEl];
-  return { splitInstance, characters };
+  // Use words (not characters) so each cue reveal finishes sooner.
+  const splitInstance = SplitText ? new SplitText(cueEl, { type: "words" }) : null;
+  const words = splitInstance?.words?.length ? splitInstance.words : [cueEl];
+  return { splitInstance, words };
 }
 
-function setInitialState({ gsap, characters, yOffset }) {
-  gsap.set(characters, {
+function setInitialState({ gsap, words, yOffset }) {
+  gsap.set(words, {
     opacity: 0,
     y: yOffset,
     color: ORANGE,
@@ -37,14 +38,14 @@ function setInitialState({ gsap, characters, yOffset }) {
 }
 
 // --- Default cue animation ---
-// A clean character reveal that is easy to tune from Webflow data attributes.
-function createDefaultTimeline({ gsap, characters, yOffset, stagger, ease }) {
+// Tight, clean word reveal with shorter total duration.
+function createDefaultTimeline({ gsap, words, stagger, ease }) {
   const timeline = gsap.timeline({ paused: true });
-  timeline.to(characters, {
+  timeline.to(words, {
     opacity: 1,
     y: 0,
     color: WHITE,
-    duration: 0.4,
+    duration: 0.42,
     ease,
     stagger,
   });
@@ -52,42 +53,47 @@ function createDefaultTimeline({ gsap, characters, yOffset, stagger, ease }) {
 }
 
 // --- Special cue animation ---
-// Uses the same reveal, plus a subtle glow pulse on the full cue element.
-function createSpecialTimeline({ gsap, cueEl, characters, yOffset, stagger, ease }) {
+// Same quick reveal, with a compact glow accent.
+function createSpecialTimeline({ gsap, cueEl, words, stagger, ease }) {
   const timeline = gsap.timeline({ paused: true });
-  timeline.to(characters, {
+  timeline.to(words, {
     opacity: 1,
     y: 0,
     color: WHITE,
-    duration: 0.9,
+    duration: 0.48,
     ease,
     stagger,
   });
   timeline.to(
     cueEl,
     {
-      textShadow: "0 0 16px rgba(255,157,41,0.35)",
-      duration: 0.35,
+      textShadow: "0 0 12px rgba(255,157,41,0.28)",
+      duration: 0.2,
       yoyo: true,
       repeat: 1,
       ease: "power2.out",
     },
-    0.1
+    0.05
   );
   return timeline;
 }
 
 // --- Cue 4 premium animation ---
-// Prepared as a dedicated block so we can swap/extend it later (including Three.js hook-ups).
-function createCue4Timeline({ gsap, cueEl, characters, yOffset, stagger, ease }) {
+// Distinct animation block for cue 4, kept separate for future upgrades
+// (for example, triggering a Three.js overlay later).
+//
+// DOM reference for cue 4:
+// - data-cue-id="cue-4" (preferred)
+// - or data-cue-number="4"
+function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
   const timeline = gsap.timeline({ paused: true });
-  timeline.to(characters, {
+  timeline.to(words, {
     opacity: 1,
     y: 0,
     color: WHITE,
     filter: "blur(0px)",
     scale: 1,
-    duration: 1.05,
+    duration: 0.56,
     ease,
     stagger,
   });
@@ -95,8 +101,8 @@ function createCue4Timeline({ gsap, cueEl, characters, yOffset, stagger, ease })
     cueEl,
     { letterSpacing: "0.02em" },
     {
-      letterSpacing: "0.06em",
-      duration: 0.45,
+      letterSpacing: "0.045em",
+      duration: 0.22,
       ease: "sine.out",
       yoyo: true,
       repeat: 1,
@@ -113,26 +119,36 @@ export function createCueAnimationState({
   gsap = window.gsap,
   SplitText = window.SplitText,
 }) {
-  const { splitInstance, characters } = getSplitTargets({ cueEl, SplitText });
-  const yOffset = Number.parseFloat(cueEl.dataset.cueY) || 18;
+  const { splitInstance, words } = getSplitTargets({ cueEl, SplitText });
+
+  // yOffset controls how far words travel before settling at y: 0.
+  const yOffset = Number.parseFloat(cueEl.dataset.cueY) || 14;
+
+  // Word stagger is intentionally small so reveals stay premium but finish quickly.
   const stagger = Math.min(
-    0.04,
-    Math.max(0.02, Number.parseFloat(cueEl.dataset.cueStagger) || 0.03)
+    0.06,
+    Math.max(0.03, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
   );
+
   const ease = cueEl.dataset.cueEase || "power3.out";
 
-  setInitialState({ gsap, characters, yOffset });
+  setInitialState({ gsap, words, yOffset });
+
   if (cueType === "cue4") {
-    gsap.set(characters, { filter: "blur(6px)", scale: 0.96 });
+    gsap.set(words, {
+      filter: "blur(5px)",
+      scale: 0.97,
+      willChange: "opacity, transform, color, filter",
+    });
   }
 
   let timeline = null;
+
   if (cueType === "special") {
     timeline = createSpecialTimeline({
       gsap,
       cueEl,
-      characters,
-      yOffset,
+      words,
       stagger,
       ease,
     });
@@ -140,16 +156,14 @@ export function createCueAnimationState({
     timeline = createCue4Timeline({
       gsap,
       cueEl,
-      characters,
-      yOffset,
+      words,
       stagger,
       ease,
     });
   } else {
     timeline = createDefaultTimeline({
       gsap,
-      characters,
-      yOffset,
+      words,
       stagger,
       ease,
     });
@@ -159,32 +173,39 @@ export function createCueAnimationState({
     cueEl,
     cueType,
     splitInstance,
-    characters,
+    words,
     timeline,
   };
 }
 
 export function playDefaultCueAnimation(animationState) {
+  // Enter animation speed.
+  animationState.timeline.timeScale(1);
   animationState.timeline.play();
 }
 
 export function playSpecialCueAnimation(animationState) {
+  // Enter animation speed.
+  animationState.timeline.timeScale(1);
   animationState.timeline.play();
 }
 
 export function playCue4Animation(animationState) {
+  // Enter animation speed.
+  animationState.timeline.timeScale(1);
   animationState.timeline.play();
 }
 
 // Called when cue leaves its active window.
-// This reverses the current timeline back to hidden state.
+// Exit is intentionally faster than enter to reduce overlap.
 export function hideCueAnimation(animationState) {
+  animationState.timeline.timeScale(2.2);
   animationState.timeline.reverse();
 }
 
 export function destroyCueAnimation(animationState, gsap = window.gsap) {
   animationState.timeline.kill();
-  gsap.set(animationState.characters, {
+  gsap.set(animationState.words, {
     clearProps: "opacity,transform,color,filter,scale,willChange",
   });
   gsap.set(animationState.cueEl, {
