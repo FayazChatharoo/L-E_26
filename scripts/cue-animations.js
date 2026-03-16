@@ -92,7 +92,7 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
     y: 0,
     color: WHITE,
     filter: "blur(0px)",
-    scale: 1,
+    scale: 10,
     duration: 0.56,
     ease,
     stagger,
