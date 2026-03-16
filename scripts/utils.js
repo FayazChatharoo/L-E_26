@@ -1,3 +1,12 @@
+import {
+  createCueAnimationState,
+  destroyCueAnimation,
+  hideCueAnimation,
+  playCue4Animation,
+  playDefaultCueAnimation,
+  playSpecialCueAnimation,
+} from "./cue-animations.js";
+
 export function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
@@ -46,7 +55,6 @@ export function createCueController({
   stageName = "",
   gsap = window.gsap,
   getDebugTime = null,
-  cueAnimators = {},
 } = {}) {
   if (!scopeEl || !gsap) {
     return {
@@ -77,153 +85,46 @@ export function createCueController({
     return "default";
   }
 
-  function defaultAnimator(cue) {
-    return {
-      init() {
-        gsap.set(cue.chars, {
-          opacity: 0,
-          y: cue.yFrom,
-          color: "#FF9D29",
-          willChange: "opacity, transform, color",
-        });
-      },
-      update(mix) {
-        const totalStagger = Math.max(0, (cue.chars.length - 1) * cue.stagger);
-        const usableSpan = Math.max(0.001, 1 - totalStagger);
-        const baseColor = "#FF9D29";
-        const finalColor = "#FFFFFF";
-
-        cue.chars.forEach((charEl, index) => {
-          const startOffset = index * cue.stagger;
-          const charProgress = clamp((mix - startOffset) / usableSpan, 0, 1);
-          const eased = cue.ease(charProgress);
-          gsap.set(charEl, {
-            opacity: eased,
-            y: (1 - eased) * cue.yFrom,
-            color: gsap.utils.interpolate(baseColor, finalColor, eased),
-          });
-        });
-      },
-      destroy() {
-        gsap.set(cue.chars, {
-          clearProps: "opacity,transform,color,willChange",
-        });
-      },
-    };
-  }
-
-  function specialAnimator(cue) {
-    const base = defaultAnimator(cue);
-    return {
-      init: base.init,
-      update(mix) {
-        base.update(mix);
-        const glow = gsap.utils.interpolate(0, 1, mix);
-        gsap.set(cue.el, {
-          textShadow: `0 0 ${6 + glow * 14}px rgba(255, 157, 41, ${0.18 + glow * 0.25})`,
-        });
-      },
-      destroy() {
-        base.destroy();
-        gsap.set(cue.el, { clearProps: "textShadow" });
-      },
-    };
-  }
-
-  function cue4Animator(cue) {
-    const base = defaultAnimator(cue);
-    return {
-      init() {
-        base.init();
-        gsap.set(cue.chars, {
-          filter: "blur(6px)",
-          scale: 0.96,
-          transformOrigin: "50% 50%",
-          willChange: "opacity, transform, color, filter",
-        });
-      },
-      update(mix) {
-        base.update(mix);
-        cue.chars.forEach((charEl, index) => {
-          const startOffset = index * cue.stagger;
-          const charProgress = clamp((mix - startOffset) / Math.max(0.001, 1 - startOffset), 0, 1);
-          const eased = cue.ease(charProgress);
-          gsap.set(charEl, {
-            filter: `blur(${(1 - eased) * 6}px)`,
-            scale: gsap.utils.interpolate(0.96, 1, eased),
-          });
-        });
-      },
-      destroy() {
-        base.destroy();
-        gsap.set(cue.chars, {
-          clearProps: "filter,scale,transformOrigin,willChange",
-        });
-      },
-    };
-  }
-
-  const animatorFactories = {
-    default: defaultAnimator,
-    special: specialAnimator,
-    cue4: cue4Animator,
-    ...cueAnimators,
-  };
-
   const cues = nodes.map((el) => {
-    const split = SplitText ? new SplitText(el, { type: "chars" }) : null;
-    const chars = split?.chars?.length ? split.chars : [el];
     const cueId = el.dataset.cueId || "";
     const cueType = getCueType(el, cueId);
+    const animationState = createCueAnimationState({
+      cueEl: el,
+      cueType,
+      gsap,
+      SplitText,
+    });
 
-    const cue = {
+    return {
       el,
-      split,
-      chars,
       id: cueId,
       type: cueType,
       start: parseCueFloat(el.dataset.cueStart, 0),
       end: parseCueFloat(el.dataset.cueEnd, 1),
-      once: el.dataset.cueOnce === "true",
-      intro: parseCueFloat(el.dataset.cueIntro, 0.08),
-      outro: parseCueFloat(el.dataset.cueOutro, 0.96),
-      yFrom: Number.parseFloat(el.dataset.cueY) || 18,
-      stagger: clamp(Number.parseFloat(el.dataset.cueStagger) || 0.03, 0.02, 0.04),
-      ease: gsap.parseEase(el.dataset.cueEase || "power3.out"),
-      pace: Math.max(1, Number.parseFloat(el.dataset.cuePace) || 1.2),
-      maxProgress: 0,
+      lastProgress: 0,
       wasActive: false,
-      animator: null,
+      animationState,
     };
-
-    const animatorFactory =
-      animatorFactories[cue.type] || animatorFactories.default;
-    cue.animator = animatorFactory(cue);
-    return cue;
   });
 
-  cues.forEach((cue) => {
-    cue.animator.init();
-  });
-
-  function cueMix(cue, progress) {
-    const p = clamp(progress, 0, 1);
-    const fadeInEnd = Math.max(0.001, cue.intro);
-    const fadeOutStart = Math.min(0.999, Math.max(cue.intro, cue.outro));
-
-    if (p <= fadeInEnd) {
-      return cue.ease(normalizeRange(p, 0, fadeInEnd));
+  function playCueAnimation(cue) {
+    if (cue.type === "special") {
+      playSpecialCueAnimation(cue.animationState);
+      return;
     }
-    if (p >= fadeOutStart) {
-      return cue.ease(1 - normalizeRange(p, fadeOutStart, 1));
+    if (cue.type === "cue4") {
+      playCue4Animation(cue.animationState);
+      return;
     }
-    return 1;
+    playDefaultCueAnimation(cue.animationState);
   }
 
   function update(progress) {
     const p = clamp(progress, 0, 1);
     cues.forEach((cue) => {
       const isActive = p >= cue.start && p <= cue.end;
+      cue.lastProgress = normalizeRange(p, cue.start, cue.end);
+
       if (isActive && !cue.wasActive) {
         const debugTime = typeof getDebugTime === "function" ? getDebugTime() : NaN;
         const timeLabel = Number.isFinite(debugTime)
@@ -234,29 +135,21 @@ export function createCueController({
             2
           )} | time: ${timeLabel}`
         );
+        playCueAnimation(cue);
       }
+
+      if (!isActive && cue.wasActive) {
+        hideCueAnimation(cue.animationState);
+      }
+
       cue.wasActive = isActive;
-
-      const localProgress = normalizeRange(p, cue.start, cue.end);
-      cue.maxProgress = Math.max(cue.maxProgress, localProgress);
-
-      let animatedProgress = localProgress;
-      if (cue.once && cue.maxProgress >= 1) {
-        animatedProgress = 1;
-      }
-
-      const pacedProgress = clamp(animatedProgress / cue.pace, 0, 1);
-      const mix = cueMix(cue, pacedProgress);
-      cue.animator.update(mix);
-
-      cue.el.style.pointerEvents = mix > 0.98 ? "" : "none";
+      cue.el.style.pointerEvents = isActive ? "" : "none";
     });
   }
 
   function destroy() {
     cues.forEach((cue) => {
-      cue.animator.destroy();
-      cue.split?.revert();
+      destroyCueAnimation(cue.animationState, gsap);
       cue.el.style.pointerEvents = "";
     });
   }
