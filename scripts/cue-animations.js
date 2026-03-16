@@ -18,7 +18,7 @@
     - createCue4Timeline()
 */
 
-const ORANGE = "#FF9D29";
+const ORANGE = "#FF0000";
 const WHITE = "#FFFFFF";
 
 function getSplitTargets({ cueEl, SplitText }) {
@@ -44,7 +44,7 @@ function createDefaultTimeline({ gsap, characters, yOffset, stagger, ease }) {
     opacity: 1,
     y: 0,
     color: WHITE,
-    duration: 0.8,
+    duration: 0.4,
     ease,
     stagger,
   });
