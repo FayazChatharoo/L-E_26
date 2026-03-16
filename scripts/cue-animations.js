@@ -31,7 +31,7 @@ function getSplitTargets({ cueEl, SplitText }) {
 function setInitialState({ gsap, words, yOffset }) {
   gsap.set(words, {
     opacity: 0,
-    y: yOffset,
+    y: 0, //yOffset
     color: ORANGE,
     willChange: "opacity, transform, color",
   });
@@ -92,16 +92,16 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
     y: 0,
     color: ORANGE,
     filter: "blur(0px)",
-    scale: 1,
+    scale: 1.4,
     duration: 0.56,
     ease,
     stagger,
   });
   timeline.fromTo(
     cueEl,
-    { letterSpacing: "0.02em" },
+    { letterSpacing: "var(--letter-spacing--heading-1)" },
     {
-      letterSpacing: "0.045em",
+      letterSpacing: "0.1em",
       duration: 0.22,
       ease: "sine.out",
       yoyo: true,
