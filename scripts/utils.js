@@ -110,7 +110,7 @@ export function createCueController({
   }
 
   function update(progress) {
-    const p = clamp(progress, 0, 1);
+    const p = clamp(progress, 0, 0.6);
     cues.forEach((cue) => {
       const localProgress = normalizeRange(p, cue.start, cue.end);
       cue.maxProgress = Math.max(cue.maxProgress, localProgress);
