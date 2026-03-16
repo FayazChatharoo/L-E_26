@@ -124,7 +124,7 @@ export function createCueAnimationState({
   const yOffset = Number.parseFloat(cueEl.dataset.cueY) || 14;
 
   // Word stagger is intentionally small so reveals stay premium but finish quickly.
-  const stagger = Math.min(0.06, Math.max(0.03, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
+  const stagger = Math.min(0.1, Math.max(0.05, Number.parseFloat(cueEl.dataset.cueStagger) || 0.045)
   );
 
   const ease = cueEl.dataset.cueEase || "expo.inOut";
@@ -133,9 +133,8 @@ export function createCueAnimationState({
 
   if (cueType === "cue4") {
     gsap.set(words, {
-      opacity: 1,
       color: WHITE,
-      willChange: "opacity, color",
+      willChange: "color",
     });
   }
 
