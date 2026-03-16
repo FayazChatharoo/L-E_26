@@ -90,9 +90,9 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
   timeline.to(words, {
     opacity: 1,
     y: 0,
-    color: WHITE,
+    color: ORANGE,
     filter: "blur(0px)",
-    scale: 10,
+    scale: 1,
     duration: 0.56,
     ease,
     stagger,
