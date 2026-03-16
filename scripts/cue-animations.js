@@ -86,28 +86,37 @@ function createSpecialTimeline({ gsap, cueEl, words, stagger, ease }) {
 // - data-cue-id="cue-4" (preferred)
 // - or data-cue-number="4"
 function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
+
   const timeline = gsap.timeline({ paused: true });
-  timeline.to(words, {
+
+  // Cue4 starts already visible and white
+  timeline.set(words, {
     opacity: 1,
-    y: 0,
+    color: WHITE,
+  });
+
+  timeline.to(words, {
     color: ORANGE,
     filter: "blur(0px)",
-    duration: 1.5,
+    scale: 1,
+    duration: 0.42,
     ease,
-    stagger,
+    stagger
   });
+
   timeline.fromTo(
     cueEl,
     { letterSpacing: "var(--letter-spacing--heading-1)" },
     {
-      letterSpacing: "var(--letter-spacing--heading-1)",
-      duration: 0.22,
+      letterSpacing: "calc(var(--letter-spacing--heading-1) * 1.15)",
+      duration: 0.18,
       ease: "sine.out",
       yoyo: true,
-      repeat: 1,
+      repeat: 1
     },
     0
   );
+
   return timeline;
 }
 
