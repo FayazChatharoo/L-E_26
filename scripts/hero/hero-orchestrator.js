@@ -10,7 +10,7 @@ const DEFAULT_CONFIG = {
   overlaySelector: '[data-hero-overlay="black"]',
   dissolveCanvasSelector: '[data-hero-canvas="dissolve"]',
   tunnelCanvasSelector: '[data-hero-canvas="tunnel"]',
-  scrollDistance: 5000,
+  scrollDistance: 9000,
   ranges: {
     video: [0.0, 0.6],
     dissolve: [0.6, 0.8],

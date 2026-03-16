@@ -99,7 +99,7 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
     color: ORANGE,
     filter: "blur(0px)",
     scale: 1,
-    duration: 0.42,
+    duration: 1,
     ease,
     stagger
   });
@@ -108,7 +108,7 @@ function createCue4Timeline({ gsap, cueEl, words, stagger, ease }) {
     cueEl,
     { letterSpacing: "var(--letter-spacing--heading-1)" },
     {
-      letterSpacing: "calc(var(--letter-spacing--heading-1) * 1.15)",
+      letterSpacing: "var(--letter-spacing--heading-1)",
       duration: 0.18,
       ease: "sine.out",
       yoyo: true,
