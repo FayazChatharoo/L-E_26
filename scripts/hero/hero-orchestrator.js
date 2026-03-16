@@ -198,7 +198,7 @@ export function initHeroOrchestrator(userConfig = {}) {
     start: "top top",
     end: `+=${config.scrollDistance}`,
     pin: true,
-    scrub: true,
+    scrub: 2,
     anticipatePin: 1,
     invalidateOnRefresh: true,
     onUpdate: (self) => renderAtProgress(self.progress),

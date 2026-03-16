@@ -18,11 +18,13 @@ export function initHeroVideo({
   let isReady = Number.isFinite(videoEl.duration) && videoEl.duration > 0;
   let duration = isReady ? videoEl.duration : 0;
   let lastTime = -1;
+  let debugTime = 0;
 
   const cues = createCueController({
     scopeEl: stageEl,
     selector: cueSelector,
     stageName: "video",
+    getDebugTime: () => debugTime,
   });
 
   if (!videoEl.hasAttribute("playsinline")) {
@@ -56,6 +58,7 @@ export function initHeroVideo({
     }
 
     const p = clamp(progress, 0, 1);
+    debugTime = isReady && duration > 0 ? p * duration : 0;
     cues.update(p);
 
     if (!isReady || duration <= 0) {
