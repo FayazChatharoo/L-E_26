@@ -76,11 +76,11 @@ export function initHeroVideo({
     const maxTime = Math.max(0, duration - 0.001);
     videoEl.currentTime = clamp(targetTime, 0, maxTime);
     lastTime = videoEl.currentTime;
-    console.log(
-      `[Hero Video] time: ${videoEl.currentTime.toFixed(2)}s / ${duration.toFixed(
-        2
-      )}s`
-    );
+    // console.log(
+    //   `[Hero Video] time: ${videoEl.currentTime.toFixed(2)}s / ${duration.toFixed(
+    //     2
+    //   )}s`
+    // );
   }
 
   function destroy() {
