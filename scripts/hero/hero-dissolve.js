@@ -124,7 +124,13 @@ function fitModelToCamera(THREE, root, camera) {
 }
 
 function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
+  const baseColor = new THREE.Color(config.baseColor);
+  if (originalMaterial?.color?.isColor) {
+    baseColor.copy(originalMaterial.color);
+  }
+
   const material = new TSL.MeshPhysicalNodeMaterial({
+    color: baseColor,
     roughness:
       typeof originalMaterial?.roughness === "number"
         ? originalMaterial.roughness
@@ -139,18 +145,12 @@ function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
     depthWrite: true,
   });
 
-  // Preserve the most important surface properties if they exist.
-  if (originalMaterial?.map) material.map = originalMaterial.map;
-  if (originalMaterial?.normalMap) material.normalMap = originalMaterial.normalMap;
-  if (originalMaterial?.roughnessMap) material.roughnessMap = originalMaterial.roughnessMap;
-  if (originalMaterial?.metalnessMap) material.metalnessMap = originalMaterial.metalnessMap;
-
   const uniforms = {
     progress: TSL.uniform(0),
     edge: TSL.uniform(config.edge),
     frequency: TSL.uniform(config.frequency),
     noiseOffset: TSL.uniform(new THREE.Vector3(0, 2.6, 0)),
-    baseColor: TSL.uniform(new THREE.Color(config.baseColor)),
+    baseColor: TSL.uniform(baseColor),
     edgeColor: TSL.uniform(new THREE.Color(config.edgeColor)),
   };
 
