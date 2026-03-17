@@ -3,7 +3,7 @@ import { clamp, createCueController } from "../utils.js";
 const DEBUG_HERO = true;
 
 const DISSOLVE_CONFIG = {
-  modelUrls: ["/ASSETS/dissolve.glb", "/scripts/ASSETS/dissolve.glb"],
+  modelUrls: ["https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb", "/scripts/ASSETS/dissolve.glb"],
   edge: 0.06,
   frequency: 1.35,
   roughness: 0.2,
