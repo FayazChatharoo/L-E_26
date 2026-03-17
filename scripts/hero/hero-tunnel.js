@@ -15,21 +15,22 @@ const TUNNEL_CONFIG = {
   waveHeight: 0.145,
   lineOpacity: 0.55,
   segmentCount: 150,
-  maxTrail: 150,
+  maxTrail: 64,
   bloomStrength: 2.2,
   bloomRadius: 0.5,
   bloomThreshold: 0.15,
   signalDensity: 1,
+  maxSignalMeshes: 48,
   debug: true,
 };
 
 const SIGNAL_GROUP_CONFIG = [
-  { name: "Blue", color: "#8fc9ff", enabled: true, count: 94, speed: 0.345, trailLength: 3 },
-  { name: "Pink", color: "#ff0055", enabled: false, count: 24, speed: 0.29, trailLength: 3 },
-  { name: "Amber", color: "#ffcc00", enabled: false, count: 18, speed: 0.32, trailLength: 3 },
-  { name: "Cyan", color: "#00ffd5", enabled: false, count: 18, speed: 0.31, trailLength: 3 },
-  { name: "Violet", color: "#a855ff", enabled: false, count: 16, speed: 0.34, trailLength: 3 },
-  { name: "Green", color: "#00ff66", enabled: false, count: 16, speed: 0.3, trailLength: 3 },
+  { name: "Blue", color: "#8fc9ff", enabled: true, count: 24, speed: 0.345, trailLength: 3 },
+  { name: "Pink", color: "#ff0055", enabled: false, count: 14, speed: 0.29, trailLength: 3 },
+  { name: "Amber", color: "#ffcc00", enabled: false, count: 12, speed: 0.32, trailLength: 3 },
+  { name: "Cyan", color: "#00ffd5", enabled: false, count: 12, speed: 0.31, trailLength: 3 },
+  { name: "Violet", color: "#a855ff", enabled: false, count: 10, speed: 0.34, trailLength: 3 },
+  { name: "Green", color: "#00ff66", enabled: false, count: 10, speed: 0.3, trailLength: 3 },
 ];
 
 function getPathPoint(THREE, t, lineIndex, time, params) {
@@ -197,17 +198,32 @@ export function initHeroTunnel({
   let signalGroups = [];
   let runtimeTrailLength = 3;
   let activeSignalRatio = 1;
+  let signalAllocationsDisabled = false;
 
   function createSignalMesh() {
+    if (signalAllocationsDisabled) {
+      return null;
+    }
+
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.maxTrail * 3), 3)
-    );
-    geometry.setAttribute(
-      "color",
-      new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.maxTrail * 3), 3)
-    );
+    try {
+      geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.maxTrail * 3), 3)
+      );
+      geometry.setAttribute(
+        "color",
+        new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.maxTrail * 3), 3)
+      );
+    } catch (error) {
+      signalAllocationsDisabled = true;
+      geometry.dispose();
+      if (DEBUG_HERO) {
+        console.error("[Hero][Tunnel] signal allocation failed, disabling signal meshes", error);
+      }
+      return null;
+    }
+
     const mesh = new THREE.Line(geometry, signalMaterial);
     mesh.frustumCulled = false;
     mesh.renderOrder = 1;
@@ -231,10 +247,21 @@ export function initHeroTunnel({
       return;
     }
 
-    const targetCount = Math.max(0, Math.floor(groupState.count * TUNNEL_CONFIG.signalDensity));
+    const targetCount = Math.max(
+      0,
+      Math.min(
+        TUNNEL_CONFIG.maxSignalMeshes,
+        Math.floor(groupState.count * TUNNEL_CONFIG.signalDensity)
+      )
+    );
+
     for (let i = 0; i < targetCount; i += 1) {
+      const mesh = createSignalMesh();
+      if (!mesh) {
+        break;
+      }
       groupState.signals.push({
-        mesh: createSignalMesh(),
+        mesh,
         laneIndex: Math.floor(Math.random() * TUNNEL_CONFIG.lineCount),
         speed: 0.2 + Math.random() * 0.5,
         progress: Math.random(),
@@ -289,7 +316,7 @@ export function initHeroTunnel({
     const trailScale = 0.45 + p * 1.2;
 
     TUNNEL_CONFIG.signalDensity = densityScale;
-    activeSignalRatio = clamp(densityScale, 0.15, 1);
+    activeSignalRatio = signalAllocationsDisabled ? 0 : clamp(densityScale, 0.15, 1);
     bgMaterial.opacity = visibleAmount * (0.18 + p * 0.45);
     TUNNEL_CONFIG.waveHeight = 0.08 * waveScale;
     runtimeTrailLength = Math.max(1, Math.floor(3 * trailScale));
