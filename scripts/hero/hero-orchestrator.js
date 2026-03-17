@@ -164,9 +164,17 @@ export function initHeroOrchestrator(userConfig = {}) {
       tunnelScene.init();
     }
 
-    videoScene.update(videoProgress);
-    dissolveScene.update(dissolveProgress);
-    tunnelScene.update(tunnelProgress);
+    if (p < config.ranges.dissolve[0]) {
+      videoScene.update(videoProgress);
+    }
+
+    if (p >= config.ranges.dissolve[0] && p <= config.ranges.dissolve[1]) {
+      dissolveScene.update(dissolveProgress);
+    }
+
+    if (p >= config.ranges.tunnel[0]) {
+      tunnelScene.update(tunnelProgress);
+    }
 
     if (overlayEl) {
       const opacity = getOverlayOpacity(p, config.transitions);
