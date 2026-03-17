@@ -1,47 +1,109 @@
 import { clamp, createCueController } from "../utils.js";
 
 // Dissolve stage visual settings.
-// These values are intentionally centralized for easy tuning.
 const DISSOLVE_CONFIG = {
-  modelUrl: "../ASSETS/dissolve.glb",
-  backgroundColor: 0x000000,
+  modelUrl: "/ASSETS/dissolve.glb",
+  fallbackModelUrl: "/scripts/ASSETS/dissolve.glb",
   camera: {
-    fov: 38,
+    fov: 40,
     near: 0.1,
     far: 100,
-    position: [0, 0.15, 4.2],
+    position: [0, 0.1, 4.0],
   },
   model: {
-    scale: 1.6,
     rotationY: 0.0,
+    scale: 1.7,
   },
-  bloomStrength: 0.7,
-  bloomRadius: 0.55,
-  bloomThreshold: 0.2,
-  edge: 0.12,
-  frequency: 3.2,
+  bloomStrength: 1.25,
+  bloomRadius: 0.45,
+  bloomThreshold: 0.1,
+  edge: 0.08,
+  frequency: 4.8,
   noiseOffset: 0.0,
   particleColor: "#ff9d29",
-  particleSize: 0.9,
-  particleSpeed: 1.4,
-  decayFrequency: 2.4,
+  particleSize: 1.4,
+  particleSpeed: 1.6,
+  decayFrequency: 3.4,
 };
 
-function getThreeRuntime() {
-  const THREE = window.THREE;
-  if (!THREE) {
-    return null;
+const THREE_CDN = {
+  base: "https://cdn.jsdelivr.net/npm/three@0.160.0",
+  three: "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
+  gltfLoader:
+    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js",
+  effectComposer:
+    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/postprocessing/EffectComposer.js",
+  renderPass:
+    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/postprocessing/RenderPass.js",
+  unrealBloomPass:
+    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/postprocessing/UnrealBloomPass.js",
+};
+
+const scriptLoadCache = new Map();
+
+function loadScriptOnce(url) {
+  if (scriptLoadCache.has(url)) {
+    return scriptLoadCache.get(url);
   }
 
-  const GLTFLoader = THREE.GLTFLoader || window.GLTFLoader || null;
-  const EffectComposer =
-    THREE.EffectComposer || window.EffectComposer || window.POSTPROCESSING?.EffectComposer || null;
-  const RenderPass =
-    THREE.RenderPass || window.RenderPass || window.POSTPROCESSING?.RenderPass || null;
-  const UnrealBloomPass =
-    THREE.UnrealBloomPass || window.UnrealBloomPass || window.POSTPROCESSING?.UnrealBloomPass || null;
+  const promise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[data-codex-src="${url}"]`);
+    if (existing && existing.dataset.loaded === "true") {
+      resolve();
+      return;
+    }
 
-  return { THREE, GLTFLoader, EffectComposer, RenderPass, UnrealBloomPass };
+    const script = existing || document.createElement("script");
+    if (!existing) {
+      script.src = url;
+      script.async = true;
+      script.dataset.codexSrc = url;
+      document.head.appendChild(script);
+    }
+
+    script.addEventListener(
+      "load",
+      () => {
+        script.dataset.loaded = "true";
+        resolve();
+      },
+      { once: true }
+    );
+
+    script.addEventListener(
+      "error",
+      () => reject(new Error(`[hero-dissolve] Failed to load script: ${url}`)),
+      { once: true }
+    );
+  });
+
+  scriptLoadCache.set(url, promise);
+  return promise;
+}
+
+async function ensureThreeDependencies() {
+  if (!window.THREE) {
+    await loadScriptOnce(THREE_CDN.three);
+  }
+
+  await loadScriptOnce(THREE_CDN.gltfLoader);
+  await loadScriptOnce(THREE_CDN.effectComposer);
+  await loadScriptOnce(THREE_CDN.renderPass);
+  await loadScriptOnce(THREE_CDN.unrealBloomPass);
+
+  // Normalize globals for easier access across different script styles.
+  window.GLTFLoader = window.GLTFLoader || window.THREE?.GLTFLoader;
+  window.EffectComposer = window.EffectComposer || window.THREE?.EffectComposer;
+  window.RenderPass = window.RenderPass || window.THREE?.RenderPass;
+  window.UnrealBloomPass = window.UnrealBloomPass || window.THREE?.UnrealBloomPass;
+
+  const missing = [];
+  if (!window.THREE) missing.push("THREE");
+  if (!window.GLTFLoader) missing.push("GLTFLoader");
+
+  if (missing.length) {
+    throw new Error(`[hero-dissolve] Missing Three dependencies: ${missing.join(", ")}`);
+  }
 }
 
 function createDissolveMaterial(THREE) {
@@ -85,7 +147,6 @@ function createDissolveMaterial(THREE) {
       varying vec3 vWorldPos;
       varying vec3 vNormal;
 
-      // Hash-based pseudo noise. Good enough for stylized dissolve breakup.
       float hash(vec3 p) {
         return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453123);
       }
@@ -117,34 +178,42 @@ function createDissolveMaterial(THREE) {
       }
 
       void main() {
-        vec3 samplePos = vWorldPos * uFrequency + vec3(uNoiseOffset);
-        float pattern = noise3d(samplePos);
+        vec3 samplePos = vWorldPos * uFrequency + vec3(uNoiseOffset, uNoiseOffset * 0.5, 0.0);
+        float n1 = noise3d(samplePos);
+        float n2 = noise3d(samplePos * 2.1 + vec3(6.7, 2.9, 1.1)) * 0.5;
+        float n3 = noise3d(samplePos * 4.0 + vec3(1.3, 9.1, 5.7)) * 0.25;
 
-        // Inverted behavior (requested):
-        // progress 0 -> invisible, progress 1 -> fully visible.
+        // Fractal-style breakup with directional bias for clearer dissolve direction.
+        float pattern = (n1 + n2 + n3) / 1.75;
+        float directional = clamp((vWorldPos.y * 0.35) + 0.5, 0.0, 1.0);
+        pattern = mix(pattern, directional, 0.22);
+
+        // Inverted behavior:
+        // progress 0 => invisible
+        // progress 1 => fully visible
         float reveal = smoothstep(pattern - uEdge, pattern + uEdge, uProgress);
 
-        // A thin band around the dissolve frontier for sparks/edge glow.
-        float edgeMask = 1.0 - smoothstep(0.0, uEdge * 1.6, abs(pattern - uProgress));
-        float particlePulse = sin((pattern + uTime * uParticleSpeed) * 6.283185 * uDecayFrequency) * 0.5 + 0.5;
-        float edgeParticles = edgeMask * particlePulse * uParticleSize;
+        // Strong, visible edge band.
+        float edgeBand = 1.0 - smoothstep(0.0, uEdge * 1.35, abs(pattern - uProgress));
+        float flicker = sin((uTime * uParticleSpeed + pattern * 8.0) * 6.283185 * uDecayFrequency) * 0.5 + 0.5;
+        float particleEdge = edgeBand * flicker * uParticleSize;
 
-        float lighting = dot(normalize(vNormal), normalize(vec3(0.4, 0.8, 0.7))) * 0.35 + 0.65;
-        vec3 baseColor = vec3(1.0) * lighting;
-        vec3 color = baseColor + uParticleColor * edgeParticles;
+        float light = dot(normalize(vNormal), normalize(vec3(0.2, 0.9, 0.5))) * 0.4 + 0.6;
+        vec3 baseColor = vec3(1.0) * light;
+        vec3 edgeColor = uParticleColor * particleEdge;
 
         float alpha = reveal;
         if (alpha < 0.01) {
           discard;
         }
 
-        gl_FragColor = vec4(color, alpha);
+        gl_FragColor = vec4(baseColor + edgeColor, alpha);
       }
     `,
   });
 }
 
-function applyDissolveMaterial(root, material) {
+function applyMaterialToModel(root, material) {
   root.traverse((child) => {
     if (!child.isMesh) {
       return;
@@ -166,21 +235,107 @@ function fitModelToFrame(THREE, modelRoot) {
     return;
   }
 
-  const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
   const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-  const normalizedScale = DISSOLVE_CONFIG.model.scale / maxAxis;
+  const scale = DISSOLVE_CONFIG.model.scale / maxAxis;
 
   modelRoot.position.sub(center);
-  modelRoot.scale.setScalar(normalizedScale);
+  modelRoot.scale.setScalar(scale);
   modelRoot.rotation.y = DISSOLVE_CONFIG.model.rotationY;
 }
 
-function buildFallbackMesh(THREE, scene, material) {
-  const geometry = new THREE.IcosahedronGeometry(1, 5);
+function createFallbackMesh(THREE, scene, material) {
+  const geometry = new THREE.IcosahedronGeometry(1.0, 5);
   const mesh = new THREE.Mesh(geometry, material);
   scene.add(mesh);
   return mesh;
+}
+
+function createDebugPanel(state, onChange) {
+  const panel = document.createElement("div");
+  panel.style.position = "fixed";
+  panel.style.right = "16px";
+  panel.style.bottom = "16px";
+  panel.style.width = "260px";
+  panel.style.maxHeight = "50vh";
+  panel.style.overflow = "auto";
+  panel.style.padding = "10px";
+  panel.style.background = "rgba(8,8,12,0.85)";
+  panel.style.color = "#fff";
+  panel.style.fontFamily = "monospace";
+  panel.style.fontSize = "12px";
+  panel.style.border = "1px solid rgba(255,255,255,0.2)";
+  panel.style.borderRadius = "8px";
+  panel.style.zIndex = "9999";
+  panel.style.pointerEvents = "auto";
+  panel.setAttribute("data-hero-dissolve-debug", "true");
+
+  const title = document.createElement("div");
+  title.textContent = "Dissolve Debug";
+  title.style.marginBottom = "8px";
+  title.style.fontWeight = "bold";
+  panel.appendChild(title);
+
+  const controls = [
+    { key: "overrideProgress", label: "override progress", type: "checkbox" },
+    { key: "progress", label: "uProgress", min: 0, max: 1, step: 0.001 },
+    { key: "edge", label: "edge", min: 0.01, max: 0.25, step: 0.001 },
+    { key: "frequency", label: "frequency", min: 0.5, max: 12, step: 0.01 },
+    { key: "particleSize", label: "particleSize", min: 0, max: 3, step: 0.01 },
+    { key: "particleSpeed", label: "particleSpeed", min: 0, max: 5, step: 0.01 },
+    { key: "decayFrequency", label: "decayFrequency", min: 0, max: 8, step: 0.01 },
+    { key: "bloomStrength", label: "bloomStrength", min: 0, max: 3, step: 0.01 },
+    { key: "bloomRadius", label: "bloomRadius", min: 0, max: 1, step: 0.01 },
+    { key: "bloomThreshold", label: "bloomThreshold", min: 0, max: 1, step: 0.01 },
+  ];
+
+  controls.forEach((control) => {
+    const row = document.createElement("label");
+    row.style.display = "block";
+    row.style.marginBottom = "6px";
+
+    const text = document.createElement("div");
+    text.textContent = control.label;
+    text.style.marginBottom = "2px";
+    row.appendChild(text);
+
+    if (control.type === "checkbox") {
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = Boolean(state[control.key]);
+      input.addEventListener("input", () => {
+        state[control.key] = input.checked;
+        onChange(control.key, state[control.key]);
+      });
+      row.appendChild(input);
+    } else {
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = String(control.min);
+      input.max = String(control.max);
+      input.step = String(control.step);
+      input.value = String(state[control.key]);
+      input.style.width = "100%";
+
+      const value = document.createElement("div");
+      value.textContent = Number(state[control.key]).toFixed(3);
+
+      input.addEventListener("input", () => {
+        state[control.key] = Number(input.value);
+        value.textContent = Number(state[control.key]).toFixed(3);
+        onChange(control.key, state[control.key]);
+      });
+
+      row.appendChild(input);
+      row.appendChild(value);
+    }
+
+    panel.appendChild(row);
+  });
+
+  document.body.appendChild(panel);
+  return panel;
 }
 
 export function initHeroDissolve({
@@ -190,18 +345,32 @@ export function initHeroDissolve({
 } = {}) {
   let isDestroyed = false;
   let initialized = false;
-  let rafId = 0;
-  let needsRender = false;
+  let initStarted = false;
 
-  let runtime = null;
   let renderer = null;
-  let composer = null;
-  let bloomPass = null;
   let scene = null;
   let camera = null;
+  let composer = null;
+  let bloomPass = null;
+  let material = null;
   let modelRoot = null;
   let fallbackMesh = null;
-  let dissolveMaterial = null;
+  let rafId = 0;
+  let needsRender = false;
+  let debugPanel = null;
+
+  const debugState = {
+    overrideProgress: false,
+    progress: 0,
+    edge: DISSOLVE_CONFIG.edge,
+    frequency: DISSOLVE_CONFIG.frequency,
+    particleSize: DISSOLVE_CONFIG.particleSize,
+    particleSpeed: DISSOLVE_CONFIG.particleSpeed,
+    decayFrequency: DISSOLVE_CONFIG.decayFrequency,
+    bloomStrength: DISSOLVE_CONFIG.bloomStrength,
+    bloomRadius: DISSOLVE_CONFIG.bloomRadius,
+    bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
+  };
 
   const cues = createCueController({
     scopeEl: cueScopeEl,
@@ -234,12 +403,10 @@ export function initHeroDissolve({
       if (isDestroyed) {
         return;
       }
-
       if (needsRender) {
         needsRender = false;
         render();
       }
-
       rafId = window.requestAnimationFrame(tick);
     };
 
@@ -247,74 +414,116 @@ export function initHeroDissolve({
   }
 
   function setupPostProcessing(THREE) {
-    const { EffectComposer, RenderPass, UnrealBloomPass } = runtime;
-    if (!EffectComposer || !RenderPass || !UnrealBloomPass || !renderer) {
+    if (!window.EffectComposer || !window.RenderPass || !window.UnrealBloomPass) {
       return;
     }
 
-    composer = new EffectComposer(renderer);
-    const renderPass = new RenderPass(scene, camera);
-    bloomPass = new UnrealBloomPass(
+    composer = new window.EffectComposer(renderer);
+    const renderPass = new window.RenderPass(scene, camera);
+    bloomPass = new window.UnrealBloomPass(
       new THREE.Vector2(1, 1),
-      DISSOLVE_CONFIG.bloomStrength,
-      DISSOLVE_CONFIG.bloomRadius,
-      DISSOLVE_CONFIG.bloomThreshold
+      debugState.bloomStrength,
+      debugState.bloomRadius,
+      debugState.bloomThreshold
     );
 
     composer.addPass(renderPass);
     composer.addPass(bloomPass);
   }
 
-  function loadModelOrFallback() {
-    const { THREE, GLTFLoader } = runtime;
-    const modelUrl = canvasContainer?.dataset?.modelUrl || DISSOLVE_CONFIG.modelUrl;
-
-    if (!GLTFLoader || !modelUrl) {
-      fallbackMesh = buildFallbackMesh(THREE, scene, dissolveMaterial);
-      requestRender();
+  function applyDebugUniforms() {
+    if (!material) {
       return;
     }
 
-    const loader = new GLTFLoader();
-    loader.load(
-      modelUrl,
-      (gltf) => {
-        if (isDestroyed || !scene) {
-          return;
-        }
+    material.uniforms.uEdge.value = debugState.edge;
+    material.uniforms.uFrequency.value = debugState.frequency;
+    material.uniforms.uParticleSize.value = debugState.particleSize;
+    material.uniforms.uParticleSpeed.value = debugState.particleSpeed;
+    material.uniforms.uDecayFrequency.value = debugState.decayFrequency;
 
-        modelRoot = gltf.scene;
-        fitModelToFrame(THREE, modelRoot);
-        applyDissolveMaterial(modelRoot, dissolveMaterial);
-        scene.add(modelRoot);
-        requestRender();
-      },
-      undefined,
-      () => {
-        if (!fallbackMesh) {
-          fallbackMesh = buildFallbackMesh(THREE, scene, dissolveMaterial);
-          requestRender();
-        }
-      }
-    );
+    if (bloomPass) {
+      bloomPass.strength = debugState.bloomStrength;
+      bloomPass.radius = debugState.bloomRadius;
+      bloomPass.threshold = debugState.bloomThreshold;
+    }
   }
 
-  function init() {
-    if (initialized || isDestroyed) {
+  function mountDebugPanel() {
+    if (document.querySelector('[data-hero-dissolve-debug="true"]')) {
       return;
     }
 
-    initialized = true;
-    runtime = getThreeRuntime();
+    debugPanel = createDebugPanel(debugState, () => {
+      applyDebugUniforms();
+      requestRender();
+    });
+  }
 
-    if (!runtime || !canvasContainer) {
+  function loadModel(THREE) {
+    const modelUrlFromDom = canvasContainer?.dataset?.modelUrl || "";
+    const candidates = [modelUrlFromDom, DISSOLVE_CONFIG.modelUrl, DISSOLVE_CONFIG.fallbackModelUrl]
+      .filter(Boolean)
+      .filter((value, index, array) => array.indexOf(value) === index);
+
+    const loader = new window.GLTFLoader();
+
+    const tryLoadAtIndex = (index) => {
+      if (index >= candidates.length) {
+        console.error("[hero-dissolve] All model URL attempts failed. Using fallback mesh.");
+        fallbackMesh = createFallbackMesh(THREE, scene, material);
+        requestRender();
+        return;
+      }
+
+      const modelUrl = candidates[index];
+      console.log(`[hero-dissolve] loading model from: ${modelUrl}`);
+
+      loader.load(
+        modelUrl,
+        (gltf) => {
+          if (isDestroyed || !scene) {
+            return;
+          }
+
+          console.log(`[hero-dissolve] model loaded successfully from: ${modelUrl}`);
+          modelRoot = gltf.scene;
+          fitModelToFrame(THREE, modelRoot);
+          applyMaterialToModel(modelRoot, material);
+          scene.add(modelRoot);
+          requestRender();
+        },
+        undefined,
+        (error) => {
+          console.error(`[hero-dissolve] model load failed for: ${modelUrl}`, error);
+          tryLoadAtIndex(index + 1);
+        }
+      );
+    };
+
+    tryLoadAtIndex(0);
+  }
+
+  async function init() {
+    if (initStarted || isDestroyed) {
+      return;
+    }
+    initStarted = true;
+
+    try {
+      await ensureThreeDependencies();
+    } catch (error) {
+      console.error(error);
       return;
     }
 
-    const { THREE } = runtime;
+    if (isDestroyed || !canvasContainer || !window.THREE) {
+      return;
+    }
+
+    const THREE = window.THREE;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(DISSOLVE_CONFIG.backgroundColor);
 
     camera = new THREE.PerspectiveCamera(
       DISSOLVE_CONFIG.camera.fov,
@@ -331,16 +540,23 @@ export function initHeroDissolve({
     renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(canvasContainer.clientWidth || 1, canvasContainer.clientHeight || 1);
-    renderer.outputColorSpace = THREE.SRGBColorSpace || renderer.outputColorSpace;
+
+    if (THREE.SRGBColorSpace && "outputColorSpace" in renderer) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+    }
 
     if (!canvasContainer.contains(renderer.domElement)) {
       canvasContainer.appendChild(renderer.domElement);
     }
 
-    dissolveMaterial = createDissolveMaterial(THREE);
+    material = createDissolveMaterial(THREE);
+    applyDebugUniforms();
 
     setupPostProcessing(THREE);
-    loadModelOrFallback();
+    mountDebugPanel();
+    loadModel(THREE);
+
+    initialized = true;
     requestRender();
     startLoop();
   }
@@ -351,21 +567,26 @@ export function initHeroDissolve({
     }
 
     const p = clamp(progress, 0, 1);
+    console.log("dissolve progress", p);
     cues.update(p);
 
-    if (!initialized || !dissolveMaterial) {
+    if (!initialized || !material) {
       return;
     }
 
-    dissolveMaterial.uniforms.uProgress.value = p;
-    dissolveMaterial.uniforms.uTime.value = p * DISSOLVE_CONFIG.particleSpeed;
+    debugState.progress = p;
+    const effectiveProgress = debugState.overrideProgress ? debugState.progress : p;
+
+    material.uniforms.uProgress.value = effectiveProgress;
+    material.uniforms.uTime.value = effectiveProgress;
 
     if (modelRoot) {
-      modelRoot.rotation.y = DISSOLVE_CONFIG.model.rotationY + p * 0.22;
+      modelRoot.rotation.y = DISSOLVE_CONFIG.model.rotationY + effectiveProgress * 0.2;
     }
+
     if (fallbackMesh) {
-      fallbackMesh.rotation.y = p * Math.PI * 0.85;
-      fallbackMesh.rotation.x = p * 0.15;
+      fallbackMesh.rotation.y = effectiveProgress * Math.PI * 0.8;
+      fallbackMesh.rotation.x = effectiveProgress * 0.2;
     }
 
     requestRender();
@@ -419,20 +640,13 @@ export function initHeroDissolve({
           child.geometry.dispose();
         }
       });
-      if (scene) {
-        scene.remove(modelRoot);
-      }
+      scene?.remove(modelRoot);
       modelRoot = null;
     }
 
-    if (dissolveMaterial) {
-      dissolveMaterial.dispose();
-      dissolveMaterial = null;
-    }
-
-    if (composer) {
-      composer = null;
-      bloomPass = null;
+    if (material) {
+      material.dispose();
+      material = null;
     }
 
     if (renderer) {
@@ -443,9 +657,15 @@ export function initHeroDissolve({
       renderer = null;
     }
 
+    if (debugPanel && debugPanel.parentNode) {
+      debugPanel.parentNode.removeChild(debugPanel);
+      debugPanel = null;
+    }
+
     scene = null;
     camera = null;
-    runtime = null;
+    composer = null;
+    bloomPass = null;
   }
 
   return {
