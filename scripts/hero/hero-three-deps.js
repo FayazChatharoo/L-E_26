@@ -68,7 +68,7 @@ async function resolveModuleSpecs() {
       return getModuleSpecs(true);
     } catch (error) {
       if (DEBUG_HERO) {
-        console.warn("[Hero][ThreeDeps] import map for bare 'three' not available, using esm.sh modules");
+        console.log("[Hero][ThreeDeps] import map for bare 'three' not available, using esm.sh modules");
       }
       return getModuleSpecs(false);
     }
@@ -104,13 +104,8 @@ async function webgpuPreflight({ THREE, WEBGPU, rendererCtor }) {
       if (renderer && typeof renderer.setAnimationLoop === "function") {
         renderer.setAnimationLoop(null);
       }
-      if (renderer && typeof renderer.dispose === "function") {
-        renderer.dispose();
-      }
     } catch (disposeError) {
-      if (DEBUG_HERO) {
-        console.warn("[Hero][ThreeDeps] renderer dispose warning during preflight", disposeError);
-      }
+      // Ignore cleanup errors in preflight; they should not block backend selection.
     }
   }
 

@@ -11,8 +11,31 @@ function getRendererCtor(heroThree) {
   );
 }
 
+function resolveCanvasElement() {
+  const host = document.querySelector("[data-webgpu-poc-canvas]");
+  if (!host) {
+    return null;
+  }
+
+  if (host instanceof HTMLCanvasElement) {
+    return host;
+  }
+
+  const existingCanvas = host.querySelector("canvas");
+  if (existingCanvas instanceof HTMLCanvasElement) {
+    return existingCanvas;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.display = "block";
+  host.appendChild(canvas);
+  return canvas;
+}
+
 export async function initWebGPUSmokePOC() {
-  const canvas = document.querySelector("[data-webgpu-poc-canvas]");
+  const canvas = resolveCanvasElement();
   if (!canvas) {
     return null;
   }
@@ -36,10 +59,15 @@ export async function initWebGPUSmokePOC() {
     return null;
   }
 
-  const renderer = new RendererCtor({ canvas, alpha: true, antialias: true });
-
-  if (typeof renderer.init === "function") {
-    await renderer.init();
+  let renderer = null;
+  try {
+    renderer = new RendererCtor({ canvas, alpha: true, antialias: true });
+    if (typeof renderer.init === "function") {
+      await renderer.init();
+    }
+  } catch (error) {
+    console.warn("[Hero][RenderBackend] webgpu-unavailable", error);
+    return null;
   }
 
   const scene = new THREE.Scene();
@@ -69,7 +97,14 @@ export async function initWebGPUSmokePOC() {
   const animate = () => {
     cube.rotation.x += 0.01;
     cube.rotation.y += 0.015;
-    renderer.render(scene, camera);
+    try {
+      renderer.render(scene, camera);
+    } catch (error) {
+      console.warn("[Hero][RenderBackend] webgpu-unavailable", error);
+      if (typeof renderer.setAnimationLoop === "function") {
+        renderer.setAnimationLoop(null);
+      }
+    }
   };
 
   if (typeof renderer.setAnimationLoop === "function") {
