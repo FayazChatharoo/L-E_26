@@ -351,8 +351,10 @@ export function initHeroOrchestrator(userConfig = {}) {
   }
 
   function resizeAll() {
-    const width = rootEl.clientWidth || window.innerWidth;
-    const height = rootEl.clientHeight || window.innerHeight;
+    // Renderer must stay viewport-sized in the pinned hero flow.
+    // Using stage/root content height can exceed GPU texture limits.
+    const width = window.innerWidth || rootEl.clientWidth || 1;
+    const height = window.innerHeight || rootEl.clientHeight || 1;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     videoScene.resize(width, height, dpr);

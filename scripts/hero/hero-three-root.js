@@ -1,6 +1,16 @@
 import { clamp } from "../utils.js";
 
 const DEBUG_HERO = true;
+const MAX_RENDER_DIMENSION = 8192;
+
+function getSafePixelRatio(width, height, requestedDpr) {
+  const safeWidth = Math.max(1, width);
+  const safeHeight = Math.max(1, height);
+  const dprLimitByWidth = MAX_RENDER_DIMENSION / safeWidth;
+  const dprLimitByHeight = MAX_RENDER_DIMENSION / safeHeight;
+  const dprLimit = Math.min(dprLimitByWidth, dprLimitByHeight);
+  return Math.max(0.5, Math.min(requestedDpr, dprLimit, 2));
+}
 
 function resolveRendererConfig() {
   const heroThree = window.HeroThree || {};
@@ -70,12 +80,23 @@ export function initHeroThreeRoot({ mountEl } = {}) {
   camera.position.set(0, 0, 4);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new config.RendererCtor({ alpha: true, antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(
-    Math.max(1, mountEl.clientWidth || 1),
-    Math.max(1, mountEl.clientHeight || 1)
+  const initialWidth = Math.max(
+    1,
+    Math.min(mountEl.clientWidth || window.innerWidth || 1, window.innerWidth || 1)
   );
+  const initialHeight = Math.max(
+    1,
+    Math.min(mountEl.clientHeight || window.innerHeight || 1, window.innerHeight || 1)
+  );
+  const initialDpr = getSafePixelRatio(
+    initialWidth,
+    initialHeight,
+    window.devicePixelRatio || 1
+  );
+
+  const renderer = new config.RendererCtor({ alpha: true, antialias: true });
+  renderer.setPixelRatio(initialDpr);
+  renderer.setSize(initialWidth, initialHeight);
 
   function attachCanvas() {
     if (renderer.domElement && !mountEl.contains(renderer.domElement)) {
@@ -161,7 +182,8 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     const safeHeight = Math.max(1, height);
     camera.aspect = safeWidth / safeHeight;
     camera.updateProjectionMatrix();
-    renderer.setPixelRatio(Math.min(clamp(dpr, 1, 2), 2));
+    const safeDpr = getSafePixelRatio(safeWidth, safeHeight, clamp(dpr, 1, 2));
+    renderer.setPixelRatio(safeDpr);
     renderer.setSize(safeWidth, safeHeight, false);
     render();
   }

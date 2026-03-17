@@ -9,46 +9,23 @@ const DISSOLVE_COLORS = {
 };
 
 function createGradientPlane(THREE, colors) {
-  const geometry = new THREE.PlaneGeometry(7, 7, 1, 1);
-  const material = new THREE.ShaderMaterial({
+  const geometry = new THREE.PlaneGeometry(8, 8, 1, 1);
+  const material = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(colors.mid),
     transparent: true,
-    uniforms: {
-      uTop: { value: new THREE.Color(colors.top) },
-      uMid: { value: new THREE.Color(colors.mid) },
-      uBottom: { value: new THREE.Color(colors.bottom) },
-      uProgress: { value: 0 },
-      uVisible: { value: 0 },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 uTop;
-      uniform vec3 uMid;
-      uniform vec3 uBottom;
-      uniform float uProgress;
-      uniform float uVisible;
-      varying vec2 vUv;
-
-      void main() {
-        float curve = smoothstep(0.0, 1.0, vUv.y);
-        vec3 topBlend = mix(uMid, uTop, curve);
-        vec3 bottomBlend = mix(uBottom, uMid, curve);
-        vec3 gradient = mix(bottomBlend, topBlend, curve);
-        float pulse = 0.08 * sin((vUv.y + uProgress * 0.9) * 8.0);
-        vec3 color = gradient + vec3(pulse);
-        gl_FragColor = vec4(color, uVisible);
-      }
-    `,
+    opacity: 0,
+    depthWrite: false,
   });
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(0, 0, -1.2);
-  return { mesh, material };
+  return {
+    mesh,
+    material,
+    colorTop: new THREE.Color(colors.top),
+    colorMid: new THREE.Color(colors.mid),
+    colorBottom: new THREE.Color(colors.bottom),
+  };
 }
 
 export function initHeroDissolve({
@@ -104,8 +81,15 @@ export function initHeroDissolve({
       return;
     }
 
-    gradient.material.uniforms.uProgress.value = p;
-    gradient.material.uniforms.uVisible.value = visibleAmount;
+    const color = gradient.colorMid.clone();
+    if (p < 0.5) {
+      color.lerpColors(gradient.colorTop, gradient.colorMid, p / 0.5);
+    } else {
+      color.lerpColors(gradient.colorMid, gradient.colorBottom, (p - 0.5) / 0.5);
+    }
+    gradient.material.color.copy(color);
+    gradient.material.opacity = visibleAmount;
+    gradient.mesh.rotation.z = (p - 0.5) * 0.12;
   }
 
   function show() {
@@ -114,9 +98,7 @@ export function initHeroDissolve({
     }
     group.visible = true;
     visibleAmount = 1;
-    if (gradient) {
-      gradient.material.uniforms.uVisible.value = visibleAmount;
-    }
+    if (gradient) gradient.material.opacity = visibleAmount;
   }
 
   function hide() {
@@ -124,9 +106,7 @@ export function initHeroDissolve({
       console.log("[Hero][Dissolve] hide");
     }
     visibleAmount = 0;
-    if (gradient) {
-      gradient.material.uniforms.uVisible.value = visibleAmount;
-    }
+    if (gradient) gradient.material.opacity = visibleAmount;
     group.visible = false;
   }
 

@@ -9,46 +9,23 @@ const TUNNEL_COLORS = {
 };
 
 function createTunnelPlane(THREE, colors) {
-  const geometry = new THREE.PlaneGeometry(7, 7, 1, 1);
-  const material = new THREE.ShaderMaterial({
+  const geometry = new THREE.PlaneGeometry(8, 8, 1, 1);
+  const material = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(colors.mid),
     transparent: true,
-    uniforms: {
-      uTop: { value: new THREE.Color(colors.top) },
-      uMid: { value: new THREE.Color(colors.mid) },
-      uBottom: { value: new THREE.Color(colors.bottom) },
-      uProgress: { value: 0 },
-      uVisible: { value: 0 },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 uTop;
-      uniform vec3 uMid;
-      uniform vec3 uBottom;
-      uniform float uProgress;
-      uniform float uVisible;
-      varying vec2 vUv;
-
-      void main() {
-        float yCurve = smoothstep(0.0, 1.0, vUv.y);
-        vec3 high = mix(uMid, uTop, yCurve);
-        vec3 low = mix(uBottom, uMid, yCurve);
-        vec3 gradient = mix(low, high, yCurve);
-        float wave = 0.12 * sin((vUv.x * 14.0) + (uProgress * 10.0));
-        vec3 color = gradient + vec3(0.0, wave * 0.25, wave * 0.5);
-        gl_FragColor = vec4(color, uVisible);
-      }
-    `,
+    opacity: 0,
+    depthWrite: false,
   });
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(0, 0, -1.1);
-  return { mesh, material };
+  return {
+    mesh,
+    material,
+    colorTop: new THREE.Color(colors.top),
+    colorMid: new THREE.Color(colors.mid),
+    colorBottom: new THREE.Color(colors.bottom),
+  };
 }
 
 export function initHeroTunnel({
@@ -104,8 +81,16 @@ export function initHeroTunnel({
       return;
     }
 
-    tunnel.material.uniforms.uProgress.value = p;
-    tunnel.material.uniforms.uVisible.value = visibleAmount;
+    const color = tunnel.colorMid.clone();
+    if (p < 0.5) {
+      color.lerpColors(tunnel.colorTop, tunnel.colorMid, p / 0.5);
+    } else {
+      color.lerpColors(tunnel.colorMid, tunnel.colorBottom, (p - 0.5) / 0.5);
+    }
+    tunnel.material.color.copy(color);
+    tunnel.material.opacity = visibleAmount;
+    tunnel.mesh.rotation.z = -(p - 0.5) * 0.08;
+    tunnel.mesh.position.z = -1.1 + p * 0.15;
   }
 
   function show() {
@@ -114,9 +99,7 @@ export function initHeroTunnel({
     }
     group.visible = true;
     visibleAmount = 1;
-    if (tunnel) {
-      tunnel.material.uniforms.uVisible.value = visibleAmount;
-    }
+    if (tunnel) tunnel.material.opacity = visibleAmount;
   }
 
   function hide() {
@@ -124,9 +107,7 @@ export function initHeroTunnel({
       console.log("[Hero][Tunnel] hide");
     }
     visibleAmount = 0;
-    if (tunnel) {
-      tunnel.material.uniforms.uVisible.value = visibleAmount;
-    }
+    if (tunnel) tunnel.material.opacity = visibleAmount;
     group.visible = false;
   }
 
