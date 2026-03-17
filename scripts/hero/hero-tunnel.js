@@ -196,6 +196,7 @@ export function initHeroTunnel({
   let lines = [];
   let signalGroups = [];
   let runtimeTrailLength = 3;
+  let activeSignalRatio = 1;
 
   function createSignalMesh() {
     const geometry = new THREE.BufferGeometry();
@@ -288,19 +289,13 @@ export function initHeroTunnel({
     const trailScale = 0.45 + p * 1.2;
 
     TUNNEL_CONFIG.signalDensity = densityScale;
+    activeSignalRatio = clamp(densityScale, 0.15, 1);
     bgMaterial.opacity = visibleAmount * (0.18 + p * 0.45);
     TUNNEL_CONFIG.waveHeight = 0.08 * waveScale;
     runtimeTrailLength = Math.max(1, Math.floor(3 * trailScale));
 
     signalGroups.forEach((groupState) => {
       groupState.runtimeSpeed = groupState.speed * speedScale;
-      const targetCount = Math.max(
-        1,
-        Math.floor(groupState.count * Math.max(0.05, TUNNEL_CONFIG.signalDensity))
-      );
-      if (targetCount !== groupState.currentCount) {
-        rebuildSignalGroup(groupState);
-      }
     });
   }
 
@@ -328,8 +323,17 @@ export function initHeroTunnel({
 
       const trailLength = Math.max(1, Math.floor(groupState.trailLength * (runtimeTrailLength / 3)));
       const drawCount = Math.max(1, trailLength);
+      const activeCount = Math.max(
+        1,
+        Math.floor(groupState.signals.length * activeSignalRatio)
+      );
 
-      groupState.signals.forEach((signal) => {
+      groupState.signals.forEach((signal, signalIndex) => {
+        if (signalIndex >= activeCount) {
+          signal.mesh.geometry.setDrawRange(0, 0);
+          return;
+        }
+
         signal.progress += signal.speed * 0.6 * groupState.runtimeSpeed * dt;
 
         if (signal.progress > 1.0) {
