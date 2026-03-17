@@ -2,36 +2,48 @@ const DEBUG_HERO = true;
 
 const HERO_THREE_VERSION = "0.160.0";
 const CDN_BASE = `https://cdn.jsdelivr.net/npm/three@${HERO_THREE_VERSION}`;
+const ESM_BASE = `https://esm.sh/three@${HERO_THREE_VERSION}`;
 
 const MODULE_SPECS = {
-  three: ["three", `${CDN_BASE}/build/three.module.js`],
+  three: [
+    `${CDN_BASE}/build/three.module.js`,
+    `${ESM_BASE}`,
+    "three",
+  ],
   webgpu: [
-    "three/webgpu",
-    "three/addons/renderers/webgpu/WebGPURenderer.js",
+    `${ESM_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`,
     `${CDN_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`,
+    "three/addons/renderers/webgpu/WebGPURenderer.js",
+    "three/webgpu",
   ],
   tsl: [
-    "three/tsl",
-    "three/addons/nodes/Nodes.js",
+    `${ESM_BASE}/examples/jsm/nodes/Nodes.js`,
     `${CDN_BASE}/examples/jsm/nodes/Nodes.js`,
+    "three/addons/nodes/Nodes.js",
+    "three/tsl",
   ],
   webgpuCap: [
+    `${ESM_BASE}/examples/jsm/capabilities/WebGPU.js`,
     "three/addons/capabilities/WebGPU.js",
     `${CDN_BASE}/examples/jsm/capabilities/WebGPU.js`,
   ],
   gltfLoader: [
+    `${ESM_BASE}/examples/jsm/loaders/GLTFLoader.js`,
     "three/addons/loaders/GLTFLoader.js",
     `${CDN_BASE}/examples/jsm/loaders/GLTFLoader.js`,
   ],
   effectComposer: [
+    `${ESM_BASE}/examples/jsm/postprocessing/EffectComposer.js`,
     "three/addons/postprocessing/EffectComposer.js",
     `${CDN_BASE}/examples/jsm/postprocessing/EffectComposer.js`,
   ],
   renderPass: [
+    `${ESM_BASE}/examples/jsm/postprocessing/RenderPass.js`,
     "three/addons/postprocessing/RenderPass.js",
     `${CDN_BASE}/examples/jsm/postprocessing/RenderPass.js`,
   ],
   unrealBloomPass: [
+    `${ESM_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`,
     "three/addons/postprocessing/UnrealBloomPass.js",
     `${CDN_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`,
   ],
