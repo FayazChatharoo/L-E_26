@@ -4,6 +4,7 @@ export function initHeroVideo({
   stageEl,
   videoEl,
   cueSelector = "[data-hero-cue]",
+  startOffset = 0.5,
 } = {}) {
   if (!stageEl || !videoEl) {
     return {
@@ -58,14 +59,16 @@ export function initHeroVideo({
     }
 
     const p = clamp(progress, 0, 1);
-    debugTime = isReady && duration > 0 ? p * duration : 0;
+    const safeStartOffset = clamp(startOffset, 0, Math.max(0, duration - 0.001));
+    const playableSpan = Math.max(0, duration - safeStartOffset);
+    debugTime = isReady && duration > 0 ? safeStartOffset + p * playableSpan : 0;
     cues.update(p);
 
     if (!isReady || duration <= 0) {
       return;
     }
 
-    const targetTime = p * duration;
+    const targetTime = safeStartOffset + p * playableSpan;
     if (Math.abs(targetTime - lastTime) < 1 / 60) {
       return;
     }
