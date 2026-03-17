@@ -78,29 +78,48 @@ async function loadGLTFWithFallback(GLTFLoader, urls) {
 }
 
 function fitModelToCamera(THREE, root, camera) {
+  root.position.set(0, 0, 0);
+  root.scale.set(1, 1, 1);
   root.updateMatrixWorld(true);
 
-  const box = new THREE.Box3().setFromObject(root);
-  const size = box.getSize(new THREE.Vector3());
-  const center = box.getCenter(new THREE.Vector3());
+  const initialBox = new THREE.Box3().setFromObject(root);
+  const initialSize = initialBox.getSize(new THREE.Vector3());
+  const initialCenter = initialBox.getCenter(new THREE.Vector3());
 
-  const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+  const maxDim = Math.max(initialSize.x, initialSize.y, initialSize.z, 0.001);
   const targetSize = 2.1;
   const scale = targetSize / maxDim;
 
-  root.position.sub(center);
   root.scale.setScalar(scale);
   root.updateMatrixWorld(true);
 
+  // Recenter in world space AFTER scaling so the mesh lands at the origin.
+  const centeredBox = new THREE.Box3().setFromObject(root);
+  const centered = centeredBox.getCenter(new THREE.Vector3());
+  root.position.sub(centered);
+  root.updateMatrixWorld(true);
+
   if (camera) {
-    camera.position.set(0, 0, 3.2);
+    const fov = (camera.fov * Math.PI) / 180;
+    const distanceByHeight = (targetSize * 0.6) / Math.tan(fov * 0.5);
+    const distance = Math.max(3.2, distanceByHeight * 1.15);
+    camera.near = 0.01;
+    camera.far = 100;
+    camera.updateProjectionMatrix();
+    camera.position.set(0, 0, distance);
     camera.lookAt(0, 0, 0);
   }
 
   if (DEBUG_HERO) {
-    console.log("[Hero][Dissolve] model bounds size:", size);
-    console.log("[Hero][Dissolve] model bounds center:", center);
+    const finalBox = new THREE.Box3().setFromObject(root);
+    const finalSize = finalBox.getSize(new THREE.Vector3());
+    const finalCenter = finalBox.getCenter(new THREE.Vector3());
+    console.log("[Hero][Dissolve] model bounds size:", initialSize);
+    console.log("[Hero][Dissolve] model bounds center:", initialCenter);
     console.log("[Hero][Dissolve] model scale:", scale.toFixed(3));
+    console.log("[Hero][Dissolve] model final center:", finalCenter);
+    console.log("[Hero][Dissolve] model final size:", finalSize);
+    console.log("[Hero][Dissolve] camera position:", camera?.position);
   }
 }
 
