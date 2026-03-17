@@ -15,6 +15,9 @@ const DISSOLVE_CONFIG = {
   particleSize: 0.03,
   particleSpread: 0.18,
   particleSpeed: 0.65,
+  bloomStrength: 1.5,
+  bloomRadius: 0.2,
+  bloomThreshold: 0.1,
 };
 
 const FALLBACK_COLORS = {
@@ -143,13 +146,16 @@ function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
 
   // Inverted reveal required by project:
   // progress 0 => hidden, progress 1 => visible.
-  const visibleMask = TSL.smoothstep(
+  const revealProgress = uniforms.progress.mul(1.25).sub(0.1);
+  const dissolveMask = TSL.smoothstep(
     noise.sub(uniforms.edge),
     noise.add(uniforms.edge),
-    uniforms.progress
+    revealProgress
   );
+  const visibilityFloor = uniforms.progress.mul(0.24);
+  const visibleMask = TSL.max(dissolveMask, visibilityFloor);
 
-  const distanceToEdge = TSL.abs(noise.sub(uniforms.progress));
+  const distanceToEdge = TSL.abs(noise.sub(revealProgress));
   const edgeMask = TSL.oneMinus(TSL.smoothstep(0.0, uniforms.edge, distanceToEdge));
 
   material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor, edgeMask.mul(0.9));
@@ -319,6 +325,112 @@ function updateParticleLayer(particleLayer, progress, time, config, edgeColor, v
   particleLayer.material.opacity = visibleAmount;
 }
 
+function createDissolveDebugUI(config, handlers) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Dissolve Debug";
+  button.style.position = "fixed";
+  button.style.right = "16px";
+  button.style.bottom = "16px";
+  button.style.zIndex = "9999";
+  button.style.padding = "8px 10px";
+  button.style.fontSize = "12px";
+  button.style.border = "1px solid rgba(255,255,255,0.25)";
+  button.style.background = "rgba(0,0,0,0.65)";
+  button.style.color = "#fff";
+  button.style.cursor = "pointer";
+
+  const panel = document.createElement("div");
+  panel.style.position = "fixed";
+  panel.style.right = "16px";
+  panel.style.bottom = "52px";
+  panel.style.width = "260px";
+  panel.style.maxHeight = "60vh";
+  panel.style.overflow = "auto";
+  panel.style.zIndex = "9999";
+  panel.style.padding = "10px";
+  panel.style.border = "1px solid rgba(255,255,255,0.2)";
+  panel.style.background = "rgba(0,0,0,0.78)";
+  panel.style.color = "#fff";
+  panel.style.fontSize = "12px";
+  panel.style.display = "none";
+
+  const rows = [];
+  function addRow(label, min, max, step, value, onChange) {
+    const wrap = document.createElement("label");
+    wrap.style.display = "block";
+    wrap.style.marginBottom = "8px";
+
+    const title = document.createElement("div");
+    title.textContent = `${label}: ${value}`;
+    title.style.marginBottom = "4px";
+
+    const input = document.createElement("input");
+    input.type = "range";
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.value = String(value);
+    input.style.width = "100%";
+
+    input.addEventListener("input", () => {
+      const nextValue = Number(input.value);
+      title.textContent = `${label}: ${nextValue.toFixed(3)}`;
+      onChange(nextValue);
+    });
+
+    wrap.appendChild(title);
+    wrap.appendChild(input);
+    panel.appendChild(wrap);
+    rows.push(wrap);
+  }
+
+  const manualWrap = document.createElement("label");
+  manualWrap.style.display = "flex";
+  manualWrap.style.alignItems = "center";
+  manualWrap.style.gap = "8px";
+  manualWrap.style.marginBottom = "10px";
+
+  const manualCheck = document.createElement("input");
+  manualCheck.type = "checkbox";
+  manualCheck.addEventListener("change", () => {
+    handlers.onManualToggle(manualCheck.checked);
+  });
+
+  const manualText = document.createElement("span");
+  manualText.textContent = "Manual progress";
+  manualWrap.appendChild(manualCheck);
+  manualWrap.appendChild(manualText);
+  panel.appendChild(manualWrap);
+
+  addRow("progress", 0, 1, 0.001, 0, handlers.onManualProgress);
+  addRow("edge", 0.005, 0.25, 0.001, config.edge, handlers.onEdge);
+  addRow("frequency", 0.1, 8, 0.01, config.frequency, handlers.onFrequency);
+  addRow("noiseOffsetY", -10, 10, 0.01, 2.6, handlers.onNoiseOffsetY);
+  addRow("particleSize", 0.005, 0.12, 0.001, config.particleSize, handlers.onParticleSize);
+  addRow("particleSpeed", 0.05, 3, 0.01, config.particleSpeed, handlers.onParticleSpeed);
+  addRow("particleBand", 0.02, 0.5, 0.005, config.particleBand, handlers.onParticleBand);
+  addRow("bloomStrength", 0, 3, 0.01, config.bloomStrength, handlers.onBloomStrength);
+  addRow("bloomRadius", 0, 1, 0.01, config.bloomRadius, handlers.onBloomRadius);
+  addRow("bloomThreshold", 0, 1, 0.01, config.bloomThreshold, handlers.onBloomThreshold);
+
+  button.addEventListener("click", () => {
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+  });
+
+  document.body.appendChild(button);
+  document.body.appendChild(panel);
+
+  return {
+    button,
+    panel,
+    destroy() {
+      if (button.parentNode) button.parentNode.removeChild(button);
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+    },
+  };
+}
+
 export function initHeroDissolve({
   threeRoot,
   cueScopeEl,
@@ -355,6 +467,9 @@ export function initHeroDissolve({
   let dissolveUniforms = [];
   let particleLayer = null;
   let edgeColor = new THREE.Color(DISSOLVE_CONFIG.edgeColor);
+  let debugUI = null;
+  let manualProgressEnabled = false;
+  let manualProgressValue = 0;
 
   const cues = createCueController({
     scopeEl: cueScopeEl,
@@ -379,6 +494,9 @@ export function initHeroDissolve({
     const lit = new THREE.DirectionalLight(0xffffff, 1.4);
     lit.position.set(1.6, 1.2, 2.3);
     group.add(lit);
+
+    const ambient = new THREE.AmbientLight(0x777777, 0.9);
+    group.add(ambient);
 
     const rim = new THREE.PointLight(0xbc6dff, 1.8, 8);
     rim.position.set(-1.8, 1.1, 1.6);
@@ -453,10 +571,72 @@ export function initHeroDissolve({
         buildFallback();
       }
     });
+
+    if (!debugUI) {
+      debugUI = createDissolveDebugUI(DISSOLVE_CONFIG, {
+        onManualToggle(value) {
+          manualProgressEnabled = value;
+        },
+        onManualProgress(value) {
+          manualProgressValue = value;
+        },
+        onEdge(value) {
+          DISSOLVE_CONFIG.edge = value;
+          dissolveUniforms.forEach((u) => {
+            u.edge.value = value;
+          });
+        },
+        onFrequency(value) {
+          DISSOLVE_CONFIG.frequency = value;
+          dissolveUniforms.forEach((u) => {
+            u.frequency.value = value;
+          });
+        },
+        onNoiseOffsetY(value) {
+          dissolveUniforms.forEach((u) => {
+            u.noiseOffset.value.y = value;
+          });
+        },
+        onParticleSize(value) {
+          DISSOLVE_CONFIG.particleSize = value;
+          if (particleLayer) particleLayer.material.size = value;
+        },
+        onParticleSpeed(value) {
+          DISSOLVE_CONFIG.particleSpeed = value;
+        },
+        onParticleBand(value) {
+          DISSOLVE_CONFIG.particleBand = value;
+        },
+        onBloomStrength(value) {
+          DISSOLVE_CONFIG.bloomStrength = value;
+          threeRoot.setPostFXPreset?.("dissolve", {
+            bloomStrength: DISSOLVE_CONFIG.bloomStrength,
+            bloomRadius: DISSOLVE_CONFIG.bloomRadius,
+            bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
+          });
+        },
+        onBloomRadius(value) {
+          DISSOLVE_CONFIG.bloomRadius = value;
+          threeRoot.setPostFXPreset?.("dissolve", {
+            bloomStrength: DISSOLVE_CONFIG.bloomStrength,
+            bloomRadius: DISSOLVE_CONFIG.bloomRadius,
+            bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
+          });
+        },
+        onBloomThreshold(value) {
+          DISSOLVE_CONFIG.bloomThreshold = value;
+          threeRoot.setPostFXPreset?.("dissolve", {
+            bloomStrength: DISSOLVE_CONFIG.bloomStrength,
+            bloomRadius: DISSOLVE_CONFIG.bloomRadius,
+            bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
+          });
+        },
+      });
+    }
   }
 
   function updateFallback(progress) {
-    const p = clamp(progress, 0, 1);
+    const p = clamp(manualProgressEnabled ? manualProgressValue : progress, 0, 1);
     const color = fallback.colorMid.clone();
 
     if (p < 0.5) {
@@ -471,7 +651,7 @@ export function initHeroDissolve({
   }
 
   function update(progress) {
-    const p = clamp(progress, 0, 1);
+    const p = clamp(manualProgressEnabled ? manualProgressValue : progress, 0, 1);
     currentProgress = p;
     cues.update(p);
 
@@ -533,6 +713,12 @@ export function initHeroDissolve({
     if (particleLayer) {
       particleLayer.material.opacity = visibleAmount;
     }
+
+    threeRoot.setPostFXPreset?.("dissolve", {
+      bloomStrength: DISSOLVE_CONFIG.bloomStrength,
+      bloomRadius: DISSOLVE_CONFIG.bloomRadius,
+      bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
+    });
   }
 
   function hide() {
@@ -550,6 +736,7 @@ export function initHeroDissolve({
     }
 
     group.visible = false;
+    threeRoot.clearPostFXPreset?.();
   }
 
   function destroy() {
@@ -590,6 +777,11 @@ export function initHeroDissolve({
     if (group.parent) {
       group.parent.remove(group);
     }
+    if (debugUI) {
+      debugUI.destroy();
+      debugUI = null;
+    }
+    threeRoot.clearPostFXPreset?.();
   }
 
   return {
