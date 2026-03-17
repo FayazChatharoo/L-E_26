@@ -3,7 +3,7 @@ import { clamp, createCueController } from "../utils.js";
 // Dissolve stage visual settings.
 // These values are intentionally centralized for easy tuning.
 const DISSOLVE_CONFIG = {
-  modelUrl: "/ASSETS/dissolve.glb",
+  modelUrl: "../ASSETS/dissolve.glb",
   backgroundColor: 0x000000,
   camera: {
     fov: 38,
