@@ -527,6 +527,11 @@ export function initHeroDissolve({
 
     dissolveRoot.traverse((child) => {
       if (child.isMesh && child.geometry) {
+        // Node-based lit materials require valid normals.
+        if (!child.geometry.attributes?.normal && typeof child.geometry.computeVertexNormals === "function") {
+          child.geometry.computeVertexNormals();
+        }
+
         const result = createDissolveMaterial(THREE, TSL, child.material, DISSOLVE_CONFIG);
         child.material = result.material;
         dissolveUniforms.push(result.uniforms);
