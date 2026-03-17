@@ -4,6 +4,8 @@ import { initHeroTunnel } from "./hero-tunnel.js";
 import { initHeroThreeRoot } from "./hero-three-root.js";
 import { clamp, mapRange, normalizeRange, rafThrottle } from "../utils.js";
 
+const DEBUG_HERO = true;
+
 const DEFAULT_CONFIG = {
   triggerSelector: "[data-hero-sequence]",
   stageSelector: "[data-hero-stage]",
@@ -109,7 +111,9 @@ export function initHeroOrchestrator(userConfig = {}) {
 
   const globals = getGsapAndScrollTrigger();
   if (!globals) {
-    console.warn("[hero-orchestrator] GSAP/ScrollTrigger unavailable.");
+    if (DEBUG_HERO) {
+      console.warn("[hero-orchestrator] GSAP/ScrollTrigger unavailable.");
+    }
     return null;
   }
 
@@ -127,7 +131,14 @@ export function initHeroOrchestrator(userConfig = {}) {
   };
 
   const rootEl = document.querySelector(config.triggerSelector);
+  if (DEBUG_HERO) {
+    console.groupCollapsed("[Hero] Init");
+    console.log("[Hero][DOM] root:", rootEl ? "found" : "missing");
+  }
   if (!rootEl) {
+    if (DEBUG_HERO) {
+      console.groupEnd();
+    }
     return null;
   }
 
@@ -139,6 +150,14 @@ export function initHeroOrchestrator(userConfig = {}) {
   const videoEl = rootEl.querySelector(config.videoSelector);
   const overlayEl = rootEl.querySelector(config.overlaySelector);
   const dissolveCanvasEl = rootEl.querySelector(config.dissolveCanvasSelector);
+  if (DEBUG_HERO) {
+    console.log("[Hero][DOM] videoEl:", videoEl ? "found" : "missing");
+    console.log(
+      "[Hero][DOM] dissolveCanvasEl:",
+      dissolveCanvasEl ? "found" : "missing"
+    );
+    console.groupEnd();
+  }
 
   const threeRoot = initHeroThreeRoot({
     mountEl: dissolveCanvasEl,
@@ -165,6 +184,7 @@ export function initHeroOrchestrator(userConfig = {}) {
       tunnel: 0,
     },
   };
+  let lastProgressBucket = -1;
 
   function getCurrentStage(progress) {
     if (progress < config.ranges.video[1]) {
@@ -206,9 +226,18 @@ export function initHeroOrchestrator(userConfig = {}) {
       return;
     }
 
+    if (DEBUG_HERO) {
+      console.groupCollapsed("[Hero] Stage Change");
+      console.log(`[Hero][Stage] \u2192 ${nextStage}`);
+    }
+
     stageState.currentStage = nextStage;
 
     if (nextStage === "video") {
+      if (DEBUG_HERO) {
+        console.log("[Hero][Stage] disabling Three.js (video stage)");
+        console.groupEnd();
+      }
       dissolveScene.hide?.();
       tunnelScene.hide?.();
       threeRoot.setActiveScene(null);
@@ -216,13 +245,23 @@ export function initHeroOrchestrator(userConfig = {}) {
     }
 
     if (nextStage === "dissolve") {
+      if (DEBUG_HERO) {
+        console.log("[Hero][Stage] activating scene: dissolveScene");
+      }
       dissolveScene.init?.();
       dissolveScene.show?.();
       tunnelScene.hide?.();
       threeRoot.setActiveScene(dissolveScene);
+      if (DEBUG_HERO) {
+        console.groupEnd();
+      }
       return;
     }
 
+    if (DEBUG_HERO) {
+      console.log("[Hero][Stage] activating scene: tunnelScene");
+      console.groupEnd();
+    }
     tunnelScene.init?.();
     tunnelScene.show?.();
     dissolveScene.hide?.();
@@ -235,6 +274,11 @@ export function initHeroOrchestrator(userConfig = {}) {
     const dissolveProgress = getStageProgress(p, config.ranges.dissolve);
     const tunnelProgress = getStageProgress(p, config.ranges.tunnel);
     const nextStage = getCurrentStage(p);
+    const progressBucket = Math.floor(p * 10);
+    if (DEBUG_HERO && progressBucket !== lastProgressBucket) {
+      lastProgressBucket = progressBucket;
+      console.log(`[Hero][Scroll] progress: ${p.toFixed(2)} | stage: ${nextStage}`);
+    }
 
     if (p >= config.transitions.dissolveWarmStart && !dissolveScene.initialized) {
       dissolveScene.init();

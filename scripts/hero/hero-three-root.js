@@ -1,7 +1,29 @@
 import { clamp } from "../utils.js";
 
+const DEBUG_HERO = true;
+
 export function initHeroThreeRoot({ mountEl } = {}) {
   const THREE = window.THREE;
+  if (DEBUG_HERO) {
+    console.groupCollapsed("[Hero] ThreeRoot Init");
+    console.log("[Hero][ThreeRoot] THREE available:", Boolean(THREE));
+    console.log("[Hero][ThreeRoot] mount element:", mountEl || null);
+    console.groupEnd();
+  }
+
+  if (!THREE) {
+    if (DEBUG_HERO) {
+      console.error("[Hero][ThreeRoot] THREE is undefined — aborting init");
+    }
+    return {
+      isReady: false,
+      setActiveScene() {},
+      resize() {},
+      render() {},
+      destroy() {},
+    };
+  }
+
   if (!THREE || !mountEl) {
     return {
       isReady: false,
@@ -27,6 +49,9 @@ export function initHeroThreeRoot({ mountEl } = {}) {
 
   if (!mountEl.contains(renderer.domElement)) {
     mountEl.appendChild(renderer.domElement);
+    if (DEBUG_HERO) {
+      console.log("[Hero][ThreeRoot] canvas injected:", renderer.domElement);
+    }
   }
 
   renderer.domElement.style.width = "100%";

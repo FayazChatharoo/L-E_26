@@ -7,6 +7,8 @@ import {
   playSpecialCueAnimation,
 } from "./cue-animations.js";
 
+const DEBUG_HERO = true;
+
 export function clamp(value, min = 0, max = 1) {
   return Math.min(max, Math.max(min, value));
 }
@@ -130,11 +132,13 @@ export function createCueController({
         const timeLabel = Number.isFinite(debugTime)
           ? `${debugTime.toFixed(2)}s`
           : "n/a";
-        console.log(
-          `[Hero Cue] id: ${cue.id || cue.type || "unnamed"} | progress: ${p.toFixed(
-            2
-          )} | time: ${timeLabel}`
-        );
+        if (DEBUG_HERO) {
+          console.log(
+            `[Hero][Cue][${stageName || "unknown"}] visible: ${
+              cue.id || cue.type || "unnamed"
+            } | p=${p.toFixed(2)} | t=${timeLabel}`
+          );
+        }
         playCueAnimation(cue);
       }
 

@@ -1,5 +1,7 @@
 import { clamp, createCueController } from "../utils.js";
 
+const DEBUG_HERO = true;
+
 const TUNNEL_COLORS = {
   top: "#0d1735",
   mid: "#162f66",
@@ -85,6 +87,9 @@ export function initHeroTunnel({
       return;
     }
     initialized = true;
+    if (DEBUG_HERO) {
+      console.log("[Hero][Tunnel] init");
+    }
 
     tunnel = createTunnelPlane(THREE, TUNNEL_COLORS);
     group.add(tunnel.mesh);
@@ -104,6 +109,9 @@ export function initHeroTunnel({
   }
 
   function show() {
+    if (DEBUG_HERO) {
+      console.log("[Hero][Tunnel] show");
+    }
     group.visible = true;
     visibleAmount = 1;
     if (tunnel) {
@@ -112,6 +120,9 @@ export function initHeroTunnel({
   }
 
   function hide() {
+    if (DEBUG_HERO) {
+      console.log("[Hero][Tunnel] hide");
+    }
     visibleAmount = 0;
     if (tunnel) {
       tunnel.material.uniforms.uVisible.value = visibleAmount;

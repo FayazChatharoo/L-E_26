@@ -1,5 +1,7 @@
 import { clamp, createCueController } from "../utils.js";
 
+const DEBUG_HERO = true;
+
 export function initHeroVideo({
   stageEl,
   videoEl,
@@ -41,6 +43,10 @@ export function initHeroVideo({
     }
     duration = Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
     isReady = duration > 0;
+    if (DEBUG_HERO) {
+      console.log(`[Hero][Video] duration: ${duration.toFixed(2)}s`);
+      console.log(`[Hero][Video] ready: ${isReady}`);
+    }
   }
 
   videoEl.addEventListener("loadedmetadata", onLoadedMetadata);

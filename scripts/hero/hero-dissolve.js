@@ -1,5 +1,7 @@
 import { clamp, createCueController } from "../utils.js";
 
+const DEBUG_HERO = true;
+
 const DISSOLVE_COLORS = {
   top: "#120f1f",
   mid: "#412126",
@@ -85,6 +87,9 @@ export function initHeroDissolve({
       return;
     }
     initialized = true;
+    if (DEBUG_HERO) {
+      console.log("[Hero][Dissolve] init");
+    }
 
     gradient = createGradientPlane(THREE, DISSOLVE_COLORS);
     group.add(gradient.mesh);
@@ -104,6 +109,9 @@ export function initHeroDissolve({
   }
 
   function show() {
+    if (DEBUG_HERO) {
+      console.log("[Hero][Dissolve] show");
+    }
     group.visible = true;
     visibleAmount = 1;
     if (gradient) {
@@ -112,6 +120,9 @@ export function initHeroDissolve({
   }
 
   function hide() {
+    if (DEBUG_HERO) {
+      console.log("[Hero][Dissolve] hide");
+    }
     visibleAmount = 0;
     if (gradient) {
       gradient.material.uniforms.uVisible.value = visibleAmount;
