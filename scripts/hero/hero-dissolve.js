@@ -2,13 +2,28 @@ import { clamp, createCueController } from "../utils.js";
 
 const DEBUG_HERO = true;
 
-const DISSOLVE_COLORS = {
+const DISSOLVE_CONFIG = {
+  modelUrls: ["/ASSETS/dissolve.glb", "/scripts/ASSETS/dissolve.glb"],
+  edge: 0.06,
+  frequency: 1.35,
+  roughness: 0.2,
+  metalness: 0.85,
+  baseColor: "#191923",
+  edgeColor: "#bc6dff",
+  particleCount: 2200,
+  particleBand: 0.1,
+  particleSize: 0.03,
+  particleSpread: 0.18,
+  particleSpeed: 0.65,
+};
+
+const FALLBACK_COLORS = {
   top: "#120f1f",
   mid: "#412126",
   bottom: "#f57b28",
 };
 
-function createGradientPlane(THREE, colors) {
+function createFallbackPlane(THREE, colors) {
   const geometry = new THREE.PlaneGeometry(8, 8, 1, 1);
   const material = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colors.mid),
@@ -19,6 +34,7 @@ function createGradientPlane(THREE, colors) {
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(0, 0, -1.2);
+
   return {
     mesh,
     material,
@@ -26,6 +42,281 @@ function createGradientPlane(THREE, colors) {
     colorMid: new THREE.Color(colors.mid),
     colorBottom: new THREE.Color(colors.bottom),
   };
+}
+
+async function loadGLTFWithFallback(GLTFLoader, urls) {
+  let lastError = null;
+
+  for (const url of urls) {
+    try {
+      if (DEBUG_HERO) {
+        console.log("[Hero][Dissolve] loading model:", url);
+      }
+
+      const gltf = await new Promise((resolve, reject) => {
+        const loader = new GLTFLoader();
+        loader.load(url, resolve, undefined, reject);
+      });
+
+      if (DEBUG_HERO) {
+        console.log("[Hero][Dissolve] model loaded:", url);
+      }
+
+      return gltf;
+    } catch (error) {
+      lastError = error;
+      if (DEBUG_HERO) {
+        console.warn("[Hero][Dissolve] model load failed:", url, error);
+      }
+    }
+  }
+
+  throw lastError || new Error("Dissolve model loading failed");
+}
+
+function fitModelToCamera(THREE, root, camera) {
+  root.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+  const targetSize = 2.1;
+  const scale = targetSize / maxDim;
+
+  root.position.sub(center);
+  root.scale.setScalar(scale);
+  root.updateMatrixWorld(true);
+
+  if (camera) {
+    camera.position.set(0, 0, 3.2);
+    camera.lookAt(0, 0, 0);
+  }
+
+  if (DEBUG_HERO) {
+    console.log("[Hero][Dissolve] model bounds size:", size);
+    console.log("[Hero][Dissolve] model bounds center:", center);
+    console.log("[Hero][Dissolve] model scale:", scale.toFixed(3));
+  }
+}
+
+function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
+  const material = new TSL.MeshPhysicalNodeMaterial({
+    roughness:
+      typeof originalMaterial?.roughness === "number"
+        ? originalMaterial.roughness
+        : config.roughness,
+    metalness:
+      typeof originalMaterial?.metalness === "number"
+        ? originalMaterial.metalness
+        : config.metalness,
+    transparent: true,
+    opacity: 1,
+    side: THREE.DoubleSide,
+    depthWrite: true,
+  });
+
+  // Preserve the most important surface properties if they exist.
+  if (originalMaterial?.map) material.map = originalMaterial.map;
+  if (originalMaterial?.normalMap) material.normalMap = originalMaterial.normalMap;
+  if (originalMaterial?.roughnessMap) material.roughnessMap = originalMaterial.roughnessMap;
+  if (originalMaterial?.metalnessMap) material.metalnessMap = originalMaterial.metalnessMap;
+
+  const uniforms = {
+    progress: TSL.uniform(0),
+    edge: TSL.uniform(config.edge),
+    frequency: TSL.uniform(config.frequency),
+    noiseOffset: TSL.uniform(new THREE.Vector3(0, 2.6, 0)),
+    baseColor: TSL.uniform(new THREE.Color(config.baseColor)),
+    edgeColor: TSL.uniform(new THREE.Color(config.edgeColor)),
+  };
+
+  // Organic breakup in local/object space.
+  const noiseInput = TSL.positionLocal
+    .mul(uniforms.frequency)
+    .add(uniforms.noiseOffset);
+
+  // MaterialX fractal noise is available in Nodes.js and WebGPU-safe.
+  const noiseRaw = TSL.mx_fractal_noise_float(noiseInput, 4, 2, 0.5, 1);
+  const noise = noiseRaw.mul(0.5).add(0.5);
+
+  // Inverted reveal required by project:
+  // progress 0 => hidden, progress 1 => visible.
+  const visibleMask = TSL.smoothstep(
+    noise.sub(uniforms.edge),
+    noise.add(uniforms.edge),
+    uniforms.progress
+  );
+
+  const distanceToEdge = TSL.abs(noise.sub(uniforms.progress));
+  const edgeMask = TSL.oneMinus(TSL.smoothstep(0.0, uniforms.edge, distanceToEdge));
+
+  material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor, edgeMask.mul(0.9));
+  material.emissiveNode = uniforms.edgeColor.mul(edgeMask).mul(1.45);
+  material.opacityNode = visibleMask;
+  material.alphaTest = 0.03;
+
+  return {
+    material,
+    uniforms,
+  };
+}
+
+function buildSurfaceSamples(THREE, meshes, maxSamples) {
+  const positions = [];
+  const normals = [];
+
+  meshes.forEach((mesh) => {
+    const geom = mesh.geometry;
+    const posAttr = geom?.attributes?.position;
+    if (!posAttr) return;
+
+    const normalAttr = geom.attributes.normal;
+    const sampleStride = Math.max(1, Math.floor(posAttr.count / 1800));
+
+    const matrix = mesh.matrixWorld;
+    const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
+
+    const p = new THREE.Vector3();
+    const n = new THREE.Vector3();
+
+    for (let i = 0; i < posAttr.count; i += sampleStride) {
+      p.fromBufferAttribute(posAttr, i).applyMatrix4(matrix);
+
+      if (normalAttr) {
+        n.fromBufferAttribute(normalAttr, i).applyMatrix3(normalMatrix).normalize();
+      } else {
+        n.set(0, 1, 0);
+      }
+
+      positions.push(p.x, p.y, p.z);
+      normals.push(n.x, n.y, n.z);
+    }
+  });
+
+  const totalVertices = positions.length / 3;
+  const sampleCount = Math.min(maxSamples, totalVertices);
+
+  const basePositions = new Float32Array(sampleCount * 3);
+  const baseNormals = new Float32Array(sampleCount * 3);
+  const seeds = new Float32Array(sampleCount);
+
+  for (let i = 0; i < sampleCount; i += 1) {
+    const sourceIndex = Math.floor(Math.random() * totalVertices);
+    const src = sourceIndex * 3;
+    const dst = i * 3;
+
+    basePositions[dst] = positions[src];
+    basePositions[dst + 1] = positions[src + 1];
+    basePositions[dst + 2] = positions[src + 2];
+
+    baseNormals[dst] = normals[src];
+    baseNormals[dst + 1] = normals[src + 1];
+    baseNormals[dst + 2] = normals[src + 2];
+
+    seeds[i] = Math.random();
+  }
+
+  return {
+    sampleCount,
+    basePositions,
+    baseNormals,
+    seeds,
+  };
+}
+
+function createParticleLayer(THREE, meshes, config) {
+  const sampled = buildSurfaceSamples(THREE, meshes, config.particleCount);
+
+  const geometry = new THREE.BufferGeometry();
+  const positionAttr = new THREE.BufferAttribute(
+    new Float32Array(sampled.sampleCount * 3),
+    3
+  );
+  const colorAttr = new THREE.BufferAttribute(
+    new Float32Array(sampled.sampleCount * 3),
+    3
+  );
+
+  geometry.setAttribute("position", positionAttr);
+  geometry.setAttribute("color", colorAttr);
+
+  const material = new THREE.PointsMaterial({
+    size: config.particleSize,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    depthTest: true,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+    sizeAttenuation: true,
+  });
+
+  const points = new THREE.Points(geometry, material);
+
+  return {
+    points,
+    material,
+    geometry,
+    positionAttr,
+    colorAttr,
+    basePositions: sampled.basePositions,
+    baseNormals: sampled.baseNormals,
+    seeds: sampled.seeds,
+    count: sampled.sampleCount,
+  };
+}
+
+function updateParticleLayer(particleLayer, progress, time, config, edgeColor, visibleAmount) {
+  const p = clamp(progress, 0, 1);
+  const band = config.particleBand;
+  const spread = config.particleSpread;
+  const speed = config.particleSpeed;
+
+  const positions = particleLayer.positionAttr.array;
+  const colors = particleLayer.colorAttr.array;
+
+  for (let i = 0; i < particleLayer.count; i += 1) {
+    const seed = particleLayer.seeds[i];
+    const distance = Math.abs(seed - p);
+    const active = distance <= band;
+
+    const idx = i * 3;
+    const bx = particleLayer.basePositions[idx];
+    const by = particleLayer.basePositions[idx + 1];
+    const bz = particleLayer.basePositions[idx + 2];
+
+    const nx = particleLayer.baseNormals[idx];
+    const ny = particleLayer.baseNormals[idx + 1];
+    const nz = particleLayer.baseNormals[idx + 2];
+
+    if (!active || visibleAmount <= 0) {
+      positions[idx] = bx;
+      positions[idx + 1] = by;
+      positions[idx + 2] = bz;
+      colors[idx] = 0;
+      colors[idx + 1] = 0;
+      colors[idx + 2] = 0;
+      continue;
+    }
+
+    const intensity = 1 - distance / band;
+    const drift = intensity * spread;
+    const wave = Math.sin(time * (1.6 + seed * 2.4) * speed + seed * 23.0) * 0.03;
+
+    positions[idx] = bx + nx * drift + wave;
+    positions[idx + 1] = by + ny * drift + wave * 0.65;
+    positions[idx + 2] = bz + nz * drift;
+
+    colors[idx] = edgeColor.r * intensity;
+    colors[idx + 1] = edgeColor.g * intensity;
+    colors[idx + 2] = edgeColor.b * intensity;
+  }
+
+  particleLayer.positionAttr.needsUpdate = true;
+  particleLayer.colorAttr.needsUpdate = true;
+  particleLayer.material.opacity = visibleAmount;
 }
 
 export function initHeroDissolve({
@@ -46,12 +337,24 @@ export function initHeroDissolve({
   }
 
   const THREE = threeRoot.THREE;
+  const TSL = window.HeroThree?.TSL || null;
+  const GLTFLoader = window.HeroThree?.GLTFLoader || window.GLTFLoader;
+  const backend = window.HeroThree?.backend || "webgl";
+
   const group = new THREE.Group();
   group.visible = false;
 
   let initialized = false;
-  let gradient = null;
   let visibleAmount = 0;
+  let currentProgress = 0;
+
+  let fallback = null;
+  let useFallback = false;
+
+  let dissolveRoot = null;
+  let dissolveUniforms = [];
+  let particleLayer = null;
+  let edgeColor = new THREE.Color(DISSOLVE_CONFIG.edgeColor);
 
   const cues = createCueController({
     scopeEl: cueScopeEl,
@@ -59,67 +362,229 @@ export function initHeroDissolve({
     stageName: "dissolve",
   });
 
+  function buildFallback() {
+    useFallback = true;
+    fallback = createFallbackPlane(THREE, FALLBACK_COLORS);
+    group.add(fallback.mesh);
+  }
+
+  async function initWebGPUDissolve() {
+    const gltf = await loadGLTFWithFallback(GLTFLoader, DISSOLVE_CONFIG.modelUrls);
+
+    dissolveRoot = gltf.scene;
+    dissolveRoot.updateMatrixWorld(true);
+
+    fitModelToCamera(THREE, dissolveRoot, threeRoot.camera);
+
+    const lit = new THREE.DirectionalLight(0xffffff, 1.4);
+    lit.position.set(1.6, 1.2, 2.3);
+    group.add(lit);
+
+    const rim = new THREE.PointLight(0xbc6dff, 1.8, 8);
+    rim.position.set(-1.8, 1.1, 1.6);
+    group.add(rim);
+
+    const meshes = [];
+
+    dissolveRoot.traverse((child) => {
+      if (child.isMesh && child.geometry) {
+        const result = createDissolveMaterial(THREE, TSL, child.material, DISSOLVE_CONFIG);
+        child.material = result.material;
+        dissolveUniforms.push(result.uniforms);
+        meshes.push(child);
+      }
+    });
+
+    if (!meshes.length) {
+      throw new Error("No mesh found in dissolve model");
+    }
+
+    group.add(dissolveRoot);
+
+    particleLayer = createParticleLayer(THREE, meshes, DISSOLVE_CONFIG);
+    group.add(particleLayer.points);
+  }
+
   function init() {
     if (initialized) {
       return;
     }
     initialized = true;
+
     if (DEBUG_HERO) {
       console.log("[Hero][Dissolve] init");
     }
 
-    gradient = createGradientPlane(THREE, DISSOLVE_COLORS);
-    group.add(gradient.mesh);
     threeRoot.scene.add(group);
+
+    const canUseAdvanced =
+      backend === "webgpu" &&
+      Boolean(TSL?.MeshPhysicalNodeMaterial) &&
+      Boolean(TSL?.uniform) &&
+      Boolean(TSL?.mx_fractal_noise_float) &&
+      Boolean(TSL?.positionLocal) &&
+      Boolean(TSL?.smoothstep) &&
+      Boolean(TSL?.oneMinus) &&
+      Boolean(TSL?.mix) &&
+      Boolean(TSL?.abs) &&
+      Boolean(GLTFLoader);
+
+    if (!canUseAdvanced) {
+      if (DEBUG_HERO) {
+        console.warn("[Hero][Dissolve] advanced dissolve unavailable, using fallback plane");
+      }
+      buildFallback();
+      return;
+    }
+
+    void initWebGPUDissolve().catch((error) => {
+      if (DEBUG_HERO) {
+        console.error("[Hero][Dissolve] advanced dissolve init failed, using fallback", error);
+      }
+
+      if (dissolveRoot && dissolveRoot.parent) {
+        dissolveRoot.parent.remove(dissolveRoot);
+      }
+
+      dissolveRoot = null;
+      dissolveUniforms = [];
+
+      if (!fallback) {
+        buildFallback();
+      }
+    });
+  }
+
+  function updateFallback(progress) {
+    const p = clamp(progress, 0, 1);
+    const color = fallback.colorMid.clone();
+
+    if (p < 0.5) {
+      color.lerpColors(fallback.colorTop, fallback.colorMid, p / 0.5);
+    } else {
+      color.lerpColors(fallback.colorMid, fallback.colorBottom, (p - 0.5) / 0.5);
+    }
+
+    fallback.material.color.copy(color);
+    fallback.material.opacity = visibleAmount;
+    fallback.mesh.rotation.z = (p - 0.5) * 0.12;
   }
 
   function update(progress) {
     const p = clamp(progress, 0, 1);
+    currentProgress = p;
     cues.update(p);
 
-    if (!initialized || !gradient) {
+    if (!initialized) {
       return;
     }
 
-    const color = gradient.colorMid.clone();
-    if (p < 0.5) {
-      color.lerpColors(gradient.colorTop, gradient.colorMid, p / 0.5);
-    } else {
-      color.lerpColors(gradient.colorMid, gradient.colorBottom, (p - 0.5) / 0.5);
+    if (fallback) {
+      updateFallback(p);
+      return;
     }
-    gradient.material.color.copy(color);
-    gradient.material.opacity = visibleAmount;
-    gradient.mesh.rotation.z = (p - 0.5) * 0.12;
+
+    if (!dissolveUniforms.length) {
+      return;
+    }
+
+    dissolveUniforms.forEach((u) => {
+      u.progress.value = p;
+    });
+
+    if (particleLayer) {
+      updateParticleLayer(
+        particleLayer,
+        p,
+        performance.now() * 0.001,
+        DISSOLVE_CONFIG,
+        edgeColor,
+        visibleAmount
+      );
+    }
+  }
+
+  function tick() {
+    if (!initialized || !group.visible || !particleLayer || fallback) {
+      return;
+    }
+
+    updateParticleLayer(
+      particleLayer,
+      currentProgress,
+      performance.now() * 0.001,
+      DISSOLVE_CONFIG,
+      edgeColor,
+      visibleAmount
+    );
   }
 
   function show() {
     if (DEBUG_HERO) {
       console.log("[Hero][Dissolve] show");
     }
+
     group.visible = true;
     visibleAmount = 1;
-    if (gradient) gradient.material.opacity = visibleAmount;
+
+    if (fallback) {
+      fallback.material.opacity = visibleAmount;
+    }
+    if (particleLayer) {
+      particleLayer.material.opacity = visibleAmount;
+    }
   }
 
   function hide() {
     if (DEBUG_HERO) {
       console.log("[Hero][Dissolve] hide");
     }
+
     visibleAmount = 0;
-    if (gradient) gradient.material.opacity = visibleAmount;
+
+    if (fallback) {
+      fallback.material.opacity = 0;
+    }
+    if (particleLayer) {
+      particleLayer.material.opacity = 0;
+    }
+
     group.visible = false;
   }
 
   function destroy() {
     cues.destroy();
+
     if (!initialized) {
       return;
     }
 
-    if (gradient) {
-      gradient.mesh.geometry.dispose();
-      gradient.material.dispose();
-      gradient = null;
+    if (fallback) {
+      fallback.mesh.geometry.dispose();
+      fallback.material.dispose();
+      fallback = null;
+    }
+
+    if (particleLayer) {
+      particleLayer.geometry.dispose();
+      particleLayer.material.dispose();
+      if (particleLayer.points.parent) {
+        particleLayer.points.parent.remove(particleLayer.points);
+      }
+      particleLayer = null;
+    }
+
+    if (dissolveRoot) {
+      dissolveRoot.traverse((child) => {
+        if (child.isMesh && child.material?.dispose) {
+          child.material.dispose();
+        }
+      });
+
+      if (dissolveRoot.parent) {
+        dissolveRoot.parent.remove(dissolveRoot);
+      }
+      dissolveRoot = null;
     }
 
     if (group.parent) {
@@ -130,6 +595,7 @@ export function initHeroDissolve({
   return {
     init,
     update,
+    tick,
     show,
     hide,
     resize() {},
