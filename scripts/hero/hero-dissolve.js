@@ -129,16 +129,8 @@ function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
     baseColor.copy(originalMaterial.color);
   }
 
-  const material = new TSL.MeshPhysicalNodeMaterial({
+  const material = new TSL.MeshBasicNodeMaterial({
     color: baseColor,
-    roughness:
-      typeof originalMaterial?.roughness === "number"
-        ? originalMaterial.roughness
-        : config.roughness,
-    metalness:
-      typeof originalMaterial?.metalness === "number"
-        ? originalMaterial.metalness
-        : config.metalness,
     transparent: true,
     opacity: 1,
     side: THREE.DoubleSide,
@@ -177,8 +169,7 @@ function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
   const distanceToEdge = TSL.abs(noise.sub(revealProgress));
   const edgeMask = TSL.oneMinus(TSL.smoothstep(0.0, uniforms.edge, distanceToEdge));
 
-  material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor, edgeMask.mul(0.9));
-  material.emissiveNode = uniforms.edgeColor.mul(edgeMask).mul(1.45);
+  material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor.mul(1.7), edgeMask.mul(0.9));
   material.opacityNode = visibleMask;
   material.alphaTest = 0.03;
 
@@ -564,7 +555,7 @@ export function initHeroDissolve({
 
     const canUseAdvanced =
       backend === "webgpu" &&
-      Boolean(TSL?.MeshPhysicalNodeMaterial) &&
+      Boolean(TSL?.MeshBasicNodeMaterial) &&
       Boolean(TSL?.uniform) &&
       Boolean(TSL?.mx_fractal_noise_float) &&
       Boolean(TSL?.positionLocal) &&
