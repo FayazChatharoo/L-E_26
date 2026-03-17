@@ -74,6 +74,7 @@ export function initHeroThreeRoot({ mountEl } = {}) {
   let isReady = false;
   let activeScene = null;
   let rafId = 0;
+  let hasRenderError = false;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
@@ -116,7 +117,18 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     if (isDestroyed || !isReady) {
       return;
     }
-    renderer.render(scene, camera);
+    try {
+      renderer.render(scene, camera);
+      hasRenderError = false;
+    } catch (error) {
+      if (!hasRenderError && DEBUG_HERO) {
+        console.error("[Hero][ThreeRoot] render failed, attempting scene fallback", error);
+      }
+      hasRenderError = true;
+      if (activeScene && typeof activeScene.onRenderError === "function") {
+        activeScene.onRenderError(error);
+      }
+    }
   }
 
   function tick() {

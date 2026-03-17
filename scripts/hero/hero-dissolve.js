@@ -484,11 +484,13 @@ export function initHeroDissolve({
 
   let dissolveRoot = null;
   let dissolveUniforms = [];
+  let dissolveMeshes = [];
   let particleLayer = null;
   let edgeColor = new THREE.Color(DISSOLVE_CONFIG.edgeColor);
   let debugUI = null;
   let manualProgressEnabled = false;
   let manualProgressValue = 0;
+  let renderFallbackActive = false;
 
   const cues = createCueController({
     scopeEl: cueScopeEl,
@@ -535,6 +537,7 @@ export function initHeroDissolve({
     if (!meshes.length) {
       throw new Error("No mesh found in dissolve model");
     }
+    dissolveMeshes = meshes;
 
     group.add(dissolveRoot);
 
@@ -684,6 +687,13 @@ export function initHeroDissolve({
     }
 
     if (!dissolveUniforms.length) {
+      if (renderFallbackActive && dissolveMeshes.length) {
+        dissolveMeshes.forEach((mesh) => {
+          if (!mesh.material) return;
+          mesh.material.opacity = visibleAmount * (0.12 + p * 0.88);
+          mesh.material.transparent = true;
+        });
+      }
       return;
     }
 
@@ -704,7 +714,7 @@ export function initHeroDissolve({
   }
 
   function tick() {
-    if (!initialized || !group.visible || !particleLayer || fallback) {
+    if (!initialized || !group.visible || !particleLayer || fallback || renderFallbackActive) {
       return;
     }
 
@@ -791,6 +801,7 @@ export function initHeroDissolve({
         dissolveRoot.parent.remove(dissolveRoot);
       }
       dissolveRoot = null;
+      dissolveMeshes = [];
     }
 
     if (group.parent) {
@@ -810,6 +821,37 @@ export function initHeroDissolve({
     show,
     hide,
     resize() {},
+    onRenderError(error) {
+      if (renderFallbackActive || !dissolveRoot) {
+        return;
+      }
+      renderFallbackActive = true;
+      dissolveUniforms = [];
+
+      if (DEBUG_HERO) {
+        console.warn("[Hero][Dissolve] switching to safe material fallback after render error", error);
+      }
+
+      dissolveRoot.traverse((child) => {
+        if (!child.isMesh || !child.geometry) return;
+        if (child.material?.dispose) {
+          child.material.dispose();
+        }
+        child.material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(DISSOLVE_CONFIG.baseColor),
+          emissive: new THREE.Color(DISSOLVE_CONFIG.edgeColor).multiplyScalar(0.35),
+          roughness: 0.35,
+          metalness: 0.75,
+          transparent: true,
+          opacity: visibleAmount,
+          side: THREE.DoubleSide,
+        });
+      });
+
+      if (particleLayer) {
+        particleLayer.material.opacity = 0;
+      }
+    },
     destroy,
     get initialized() {
       return initialized;
