@@ -16,9 +16,9 @@ Use this DOM structure for the pinned hero orchestration.
 - `data-hero-video` on the `<video>` element used by stage 1 scrub
 
 ### Canvas Mount (single Three.js canvas)
-- `data-hero-canvas="dissolve"` on one container element
-- This container is the only mount for Three.js renderer canvas
-- No second canvas is required for tunnel stage
+- `data-hero-canvas-root` on a persistent container under `data-hero-sequence`
+- This element is the only mount for the shared Three.js renderer canvas
+- Do not mount shared canvas inside a stage element (`video/dissolve/tunnel`)
 
 ### Overlay
 - `data-hero-overlay="black"` for transition blend layer

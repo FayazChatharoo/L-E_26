@@ -12,6 +12,7 @@ const DEFAULT_CONFIG = {
   stageSelector: "[data-hero-stage]",
   videoSelector: "[data-hero-video]",
   overlaySelector: '[data-hero-overlay="black"]',
+  canvasRootSelector: "[data-hero-canvas-root]",
   dissolveCanvasSelector: '[data-hero-canvas="dissolve"]',
   tunnelCanvasSelector: '[data-hero-canvas="tunnel"]',
   scrollDistance: 9000,
@@ -151,17 +152,32 @@ export function initHeroOrchestrator(userConfig = {}) {
   const videoEl = rootEl.querySelector(config.videoSelector);
   const overlayEl = rootEl.querySelector(config.overlaySelector);
   const dissolveCanvasEl = rootEl.querySelector(config.dissolveCanvasSelector);
+  let sharedCanvasRootEl = rootEl.querySelector(config.canvasRootSelector);
+  if (!sharedCanvasRootEl) {
+    sharedCanvasRootEl = document.createElement("div");
+    sharedCanvasRootEl.setAttribute("data-hero-canvas-root", "true");
+    // Keep canvas ownership outside stage visibility classes.
+    sharedCanvasRootEl.style.position = "absolute";
+    sharedCanvasRootEl.style.inset = "0";
+    sharedCanvasRootEl.style.zIndex = "2";
+    sharedCanvasRootEl.style.pointerEvents = "none";
+    rootEl.appendChild(sharedCanvasRootEl);
+  }
   if (DEBUG_HERO) {
     console.log("[Hero][DOM] videoEl:", videoEl ? "found" : "missing");
     console.log(
       "[Hero][DOM] dissolveCanvasEl:",
       dissolveCanvasEl ? "found" : "missing"
     );
+    console.log(
+      "[Hero][DOM] sharedCanvasRootEl:",
+      sharedCanvasRootEl ? "found" : "missing"
+    );
     console.groupEnd();
   }
 
   const threeRoot = initHeroThreeRoot({
-    mountEl: dissolveCanvasEl,
+    mountEl: sharedCanvasRootEl,
   });
 
   const videoScene = initHeroVideo({
@@ -216,7 +232,7 @@ export function initHeroOrchestrator(userConfig = {}) {
   }
 
   function updateCanvasVisibility(progress) {
-    if (!videoEl || !dissolveCanvasEl) {
+    if (!videoEl || !sharedCanvasRootEl) {
       return;
     }
 
@@ -235,9 +251,8 @@ export function initHeroOrchestrator(userConfig = {}) {
 
     videoEl.style.opacity = String(videoOpacity);
     videoEl.style.zIndex = "1";
-    dissolveCanvasEl.style.opacity = String(canvasOpacity);
-    dissolveCanvasEl.style.zIndex = "2";
-    dissolveCanvasEl.style.pointerEvents = "none";
+    sharedCanvasRootEl.style.opacity = String(canvasOpacity);
+    sharedCanvasRootEl.style.pointerEvents = "none";
   }
 
   function switchStage(nextStage) {
@@ -382,10 +397,9 @@ export function initHeroOrchestrator(userConfig = {}) {
         videoEl.style.opacity = "";
         videoEl.style.zIndex = "";
       }
-      if (dissolveCanvasEl) {
-        dissolveCanvasEl.style.opacity = "";
-        dissolveCanvasEl.style.zIndex = "";
-        dissolveCanvasEl.style.pointerEvents = "";
+      if (sharedCanvasRootEl) {
+        sharedCanvasRootEl.style.opacity = "";
+        sharedCanvasRootEl.style.pointerEvents = "";
       }
 
       stageEls.forEach((stageEl) => {
