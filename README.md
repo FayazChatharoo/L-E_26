@@ -38,8 +38,8 @@ Add this in Webflow `</head>` custom code:
 {
   "imports": {
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.webgpu.js",
-    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.tsl.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/renderers/webgpu/WebGPURenderer.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/nodes/Nodes.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
   }
 }

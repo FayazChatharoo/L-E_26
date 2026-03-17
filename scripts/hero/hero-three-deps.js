@@ -5,8 +5,16 @@ const CDN_BASE = `https://cdn.jsdelivr.net/npm/three@${HERO_THREE_VERSION}`;
 
 const MODULE_SPECS = {
   three: ["three", `${CDN_BASE}/build/three.module.js`],
-  webgpu: ["three/webgpu", `${CDN_BASE}/build/three.webgpu.js`],
-  tsl: ["three/tsl", `${CDN_BASE}/build/three.tsl.js`],
+  webgpu: [
+    "three/webgpu",
+    "three/addons/renderers/webgpu/WebGPURenderer.js",
+    `${CDN_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`,
+  ],
+  tsl: [
+    "three/tsl",
+    "three/addons/nodes/Nodes.js",
+    `${CDN_BASE}/examples/jsm/nodes/Nodes.js`,
+  ],
   webgpuCap: [
     "three/addons/capabilities/WebGPU.js",
     `${CDN_BASE}/examples/jsm/capabilities/WebGPU.js`,
@@ -55,7 +63,9 @@ function normalizeModule(mod) {
 
 function resolveWebGPURendererCtor(webgpuModule, threeModule) {
   return (
+    webgpuModule?.default ||
     webgpuModule?.WebGPURenderer ||
+    (typeof webgpuModule === "function" ? webgpuModule : null) ||
     webgpuModule?.default?.WebGPURenderer ||
     threeModule?.WebGPURenderer ||
     null
