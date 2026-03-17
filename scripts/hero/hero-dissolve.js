@@ -3,19 +3,22 @@ import { clamp, createCueController } from "../utils.js";
 const DEBUG_HERO = true;
 
 const DISSOLVE_CONFIG = {
-  modelUrls: ["https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb", "/scripts/ASSETS/dissolve.glb"],
-  materialCheckpoint: 3,
-  edge: 0.06,
-  frequency: 1.35,
+  modelUrls: [
+    "https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb",
+    "/scripts/ASSETS/dissolve.glb",
+  ],
+  edge: 0.055,
+  frequency: 1.3,
+  noiseOffsetY: 3,
   roughness: 0.2,
-  metalness: 0.85,
-  baseColor: "#191923",
-  edgeColor: "#bc6dff",
-  particleCount: 2200,
-  particleBand: 0.1,
-  particleSize: 0.03,
-  particleSpread: 0.18,
-  particleSpeed: 0.65,
+  metalness: 0.88,
+  baseColor: "#ffffff",
+  particleColor: "#bc6dff",
+  particleCount: 12000,
+  particleSize: 1,
+  particleSpeed: 0.001,
+  decayFrequency: 1,
+  decayDistance: 0.2,
   bloomStrength: 1.5,
   bloomRadius: 0.2,
   bloomThreshold: 0.1,
@@ -26,6 +29,19 @@ const FALLBACK_COLORS = {
   mid: "#412126",
   bottom: "#f57b28",
 };
+
+function getWebGPUContext() {
+  const heroThree = window.HeroThree || {};
+  const rawWebGPU = heroThree.rawWebGPUModule || {};
+  const rawTSL = heroThree.rawTSLModule || {};
+  return {
+    WEBGPU: { ...rawWebGPU, ...(heroThree.WEBGPU || {}) },
+    TSL: { ...rawTSL, ...(heroThree.TSL || {}) },
+    MeshSurfaceSampler: heroThree.MeshSurfaceSampler || null,
+    GLTFLoader: heroThree.GLTFLoader || window.GLTFLoader || null,
+    backend: heroThree.backend || "webgl",
+  };
+}
 
 function createFallbackPlane(THREE, colors) {
   const geometry = new THREE.PlaneGeometry(8, 8, 1, 1);
@@ -94,7 +110,6 @@ function fitModelToCamera(THREE, root, camera) {
   root.scale.setScalar(scale);
   root.updateMatrixWorld(true);
 
-  // Recenter in world space AFTER scaling so the mesh lands at the origin.
   const centeredBox = new THREE.Box3().setFromObject(root);
   const centered = centeredBox.getCenter(new THREE.Vector3());
   root.position.sub(centered);
@@ -113,249 +128,13 @@ function fitModelToCamera(THREE, root, camera) {
 
   if (DEBUG_HERO) {
     const finalBox = new THREE.Box3().setFromObject(root);
-    const finalSize = finalBox.getSize(new THREE.Vector3());
-    const finalCenter = finalBox.getCenter(new THREE.Vector3());
     console.log("[Hero][Dissolve] model bounds size:", initialSize);
     console.log("[Hero][Dissolve] model bounds center:", initialCenter);
     console.log("[Hero][Dissolve] model scale:", scale.toFixed(3));
-    console.log("[Hero][Dissolve] model final center:", finalCenter);
-    console.log("[Hero][Dissolve] model final size:", finalSize);
+    console.log("[Hero][Dissolve] model final center:", finalBox.getCenter(new THREE.Vector3()));
+    console.log("[Hero][Dissolve] model final size:", finalBox.getSize(new THREE.Vector3()));
     console.log("[Hero][Dissolve] camera position:", camera?.position);
   }
-}
-
-function applyCheckpointGraph(TSL, material, uniforms, checkpoint) {
-  const safeCheckpoint = Math.min(3, Math.max(1, Math.round(checkpoint || 1)));
-
-  if (safeCheckpoint === 1) {
-    material.colorNode = uniforms.baseColor;
-    material.opacityNode = null;
-    material.alphaTest = 0;
-    return safeCheckpoint;
-  }
-
-  if (safeCheckpoint === 2) {
-    material.colorNode = uniforms.baseColor;
-    material.opacityNode = TSL.clamp(uniforms.progress, 0, 1);
-    material.alphaTest = 0;
-    return safeCheckpoint;
-  }
-
-  const noiseInput = TSL.positionLocal
-    .mul(uniforms.frequency)
-    .add(uniforms.noiseOffset);
-
-  const noiseRaw = TSL.mx_fractal_noise_float(noiseInput, 4, 2, 0.5, 1);
-  const noise = noiseRaw.mul(0.5).add(0.5);
-
-  const revealProgress = uniforms.progress.mul(1.25).sub(0.1);
-  const dissolveMask = TSL.smoothstep(
-    noise.sub(uniforms.edge),
-    noise.add(uniforms.edge),
-    revealProgress
-  );
-  const visibilityFloor = uniforms.progress.mul(0.24);
-  const visibleMask = TSL.max(dissolveMask, visibilityFloor);
-
-  const distanceToEdge = TSL.abs(noise.sub(revealProgress));
-  const edgeMask = TSL.oneMinus(TSL.smoothstep(0.0, uniforms.edge, distanceToEdge));
-
-  material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor.mul(1.7), edgeMask.mul(0.9));
-  material.opacityNode = visibleMask;
-  material.alphaTest = 0.03;
-  return safeCheckpoint;
-}
-
-function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
-  const baseColor = new THREE.Color(config.baseColor);
-  if (originalMaterial?.color?.isColor) {
-    baseColor.copy(originalMaterial.color);
-  }
-
-  const material = new TSL.MeshBasicNodeMaterial({
-    color: baseColor,
-    transparent: true,
-    opacity: 1,
-    side: THREE.DoubleSide,
-    depthWrite: true,
-  });
-
-  const uniforms = {
-    progress: TSL.uniform(0),
-    edge: TSL.uniform(config.edge),
-    frequency: TSL.uniform(config.frequency),
-    noiseOffset: TSL.uniform(new THREE.Vector3(0, 2.6, 0)),
-    baseColor: TSL.uniform(baseColor),
-    edgeColor: TSL.uniform(new THREE.Color(config.edgeColor)),
-  };
-  const checkpoint = applyCheckpointGraph(
-    TSL,
-    material,
-    uniforms,
-    config.materialCheckpoint
-  );
-
-  return {
-    material,
-    uniforms,
-    checkpoint,
-  };
-}
-
-function buildSurfaceSamples(THREE, meshes, maxSamples) {
-  const positions = [];
-  const normals = [];
-
-  meshes.forEach((mesh) => {
-    const geom = mesh.geometry;
-    const posAttr = geom?.attributes?.position;
-    if (!posAttr) return;
-
-    const normalAttr = geom.attributes.normal;
-    const sampleStride = Math.max(1, Math.floor(posAttr.count / 1800));
-
-    const matrix = mesh.matrixWorld;
-    const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrix);
-
-    const p = new THREE.Vector3();
-    const n = new THREE.Vector3();
-
-    for (let i = 0; i < posAttr.count; i += sampleStride) {
-      p.fromBufferAttribute(posAttr, i).applyMatrix4(matrix);
-
-      if (normalAttr) {
-        n.fromBufferAttribute(normalAttr, i).applyMatrix3(normalMatrix).normalize();
-      } else {
-        n.set(0, 1, 0);
-      }
-
-      positions.push(p.x, p.y, p.z);
-      normals.push(n.x, n.y, n.z);
-    }
-  });
-
-  const totalVertices = positions.length / 3;
-  const sampleCount = Math.min(maxSamples, totalVertices);
-
-  const basePositions = new Float32Array(sampleCount * 3);
-  const baseNormals = new Float32Array(sampleCount * 3);
-  const seeds = new Float32Array(sampleCount);
-
-  for (let i = 0; i < sampleCount; i += 1) {
-    const sourceIndex = Math.floor(Math.random() * totalVertices);
-    const src = sourceIndex * 3;
-    const dst = i * 3;
-
-    basePositions[dst] = positions[src];
-    basePositions[dst + 1] = positions[src + 1];
-    basePositions[dst + 2] = positions[src + 2];
-
-    baseNormals[dst] = normals[src];
-    baseNormals[dst + 1] = normals[src + 1];
-    baseNormals[dst + 2] = normals[src + 2];
-
-    seeds[i] = Math.random();
-  }
-
-  return {
-    sampleCount,
-    basePositions,
-    baseNormals,
-    seeds,
-  };
-}
-
-function createParticleLayer(THREE, meshes, config) {
-  const sampled = buildSurfaceSamples(THREE, meshes, config.particleCount);
-
-  const geometry = new THREE.BufferGeometry();
-  const positionAttr = new THREE.BufferAttribute(
-    new Float32Array(sampled.sampleCount * 3),
-    3
-  );
-  const colorAttr = new THREE.BufferAttribute(
-    new Float32Array(sampled.sampleCount * 3),
-    3
-  );
-
-  geometry.setAttribute("position", positionAttr);
-  geometry.setAttribute("color", colorAttr);
-
-  const material = new THREE.PointsMaterial({
-    size: config.particleSize,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    depthTest: true,
-    blending: THREE.AdditiveBlending,
-    vertexColors: true,
-    sizeAttenuation: true,
-  });
-
-  const points = new THREE.Points(geometry, material);
-
-  return {
-    points,
-    material,
-    geometry,
-    positionAttr,
-    colorAttr,
-    basePositions: sampled.basePositions,
-    baseNormals: sampled.baseNormals,
-    seeds: sampled.seeds,
-    count: sampled.sampleCount,
-  };
-}
-
-function updateParticleLayer(particleLayer, progress, time, config, edgeColor, visibleAmount) {
-  const p = clamp(progress, 0, 1);
-  const band = config.particleBand;
-  const spread = config.particleSpread;
-  const speed = config.particleSpeed;
-
-  const positions = particleLayer.positionAttr.array;
-  const colors = particleLayer.colorAttr.array;
-
-  for (let i = 0; i < particleLayer.count; i += 1) {
-    const seed = particleLayer.seeds[i];
-    const distance = Math.abs(seed - p);
-    const active = distance <= band;
-
-    const idx = i * 3;
-    const bx = particleLayer.basePositions[idx];
-    const by = particleLayer.basePositions[idx + 1];
-    const bz = particleLayer.basePositions[idx + 2];
-
-    const nx = particleLayer.baseNormals[idx];
-    const ny = particleLayer.baseNormals[idx + 1];
-    const nz = particleLayer.baseNormals[idx + 2];
-
-    if (!active || visibleAmount <= 0) {
-      positions[idx] = bx;
-      positions[idx + 1] = by;
-      positions[idx + 2] = bz;
-      colors[idx] = 0;
-      colors[idx + 1] = 0;
-      colors[idx + 2] = 0;
-      continue;
-    }
-
-    const intensity = 1 - distance / band;
-    const drift = intensity * spread;
-    const wave = Math.sin(time * (1.6 + seed * 2.4) * speed + seed * 23.0) * 0.03;
-
-    positions[idx] = bx + nx * drift + wave;
-    positions[idx + 1] = by + ny * drift + wave * 0.65;
-    positions[idx + 2] = bz + nz * drift;
-
-    colors[idx] = edgeColor.r * intensity;
-    colors[idx + 1] = edgeColor.g * intensity;
-    colors[idx + 2] = edgeColor.b * intensity;
-  }
-
-  particleLayer.positionAttr.needsUpdate = true;
-  particleLayer.colorAttr.needsUpdate = true;
-  particleLayer.material.opacity = visibleAmount;
 }
 
 function createDissolveDebugUI(config, handlers) {
@@ -388,7 +167,6 @@ function createDissolveDebugUI(config, handlers) {
   panel.style.fontSize = "12px";
   panel.style.display = "none";
 
-  const rows = [];
   function addRow(label, min, max, step, value, onChange) {
     const wrap = document.createElement("label");
     wrap.style.display = "block";
@@ -415,7 +193,6 @@ function createDissolveDebugUI(config, handlers) {
     wrap.appendChild(title);
     wrap.appendChild(input);
     panel.appendChild(wrap);
-    rows.push(wrap);
   }
 
   const manualWrap = document.createElement("label");
@@ -437,13 +214,12 @@ function createDissolveDebugUI(config, handlers) {
   panel.appendChild(manualWrap);
 
   addRow("progress", 0, 1, 0.001, 0, handlers.onManualProgress);
-  addRow("checkpoint", 1, 3, 1, config.materialCheckpoint, handlers.onCheckpoint);
   addRow("edge", 0.005, 0.25, 0.001, config.edge, handlers.onEdge);
   addRow("frequency", 0.1, 8, 0.01, config.frequency, handlers.onFrequency);
-  addRow("noiseOffsetY", -10, 10, 0.01, 2.6, handlers.onNoiseOffsetY);
-  addRow("particleSize", 0.005, 0.12, 0.001, config.particleSize, handlers.onParticleSize);
-  addRow("particleSpeed", 0.05, 3, 0.01, config.particleSpeed, handlers.onParticleSpeed);
-  addRow("particleBand", 0.02, 0.5, 0.005, config.particleBand, handlers.onParticleBand);
+  addRow("noiseOffsetY", -10, 10, 0.01, config.noiseOffsetY, handlers.onNoiseOffsetY);
+  addRow("particleSize", 0.05, 2, 0.001, config.particleSize, handlers.onParticleSize);
+  addRow("particleSpeed", 0, 0.005, 0.0001, config.particleSpeed, handlers.onParticleSpeed);
+  addRow("decayFrequency", 0, 2, 0.001, config.decayFrequency, handlers.onDecayFrequency);
   addRow("bloomStrength", 0, 3, 0.01, config.bloomStrength, handlers.onBloomStrength);
   addRow("bloomRadius", 0, 1, 0.01, config.bloomRadius, handlers.onBloomRadius);
   addRow("bloomThreshold", 0, 1, 0.01, config.bloomThreshold, handlers.onBloomThreshold);
@@ -456,11 +232,230 @@ function createDissolveDebugUI(config, handlers) {
   document.body.appendChild(panel);
 
   return {
-    button,
-    panel,
     destroy() {
       if (button.parentNode) button.parentNode.removeChild(button);
       if (panel.parentNode) panel.parentNode.removeChild(panel);
+    },
+  };
+}
+
+function createReferenceDissolveMesh({
+  THREE,
+  WEBGPU,
+  TSL,
+  MeshSurfaceSampler,
+  renderer,
+  mesh,
+  sourceMaterial,
+  config,
+}) {
+  const {
+    MeshStandardNodeMaterial,
+    SpriteNodeMaterial,
+    InstancedMesh,
+    PlaneGeometry,
+    AdditiveBlending,
+    DoubleSide,
+    Color,
+    Vector3,
+  } = WEBGPU;
+  const {
+    Discard,
+    Fn,
+    If,
+    deltaTime,
+    float,
+    hash,
+    instanceIndex,
+    instancedArray,
+    length,
+    min,
+    output,
+    positionLocal,
+    select,
+    sin,
+    uniform,
+    uv,
+    vec3,
+    vec4,
+    mx_fractal_noise_float,
+  } = TSL;
+
+  if (
+    !MeshStandardNodeMaterial ||
+    !SpriteNodeMaterial ||
+    !InstancedMesh ||
+    !PlaneGeometry ||
+    !MeshSurfaceSampler ||
+    !renderer?.computeAsync ||
+    !Fn ||
+    !uniform ||
+    !positionLocal ||
+    !mx_fractal_noise_float
+  ) {
+    throw new Error("Reference dissolve dependencies are unavailable");
+  }
+
+  const baseColor = new Color(config.baseColor);
+  if (sourceMaterial?.color?.isColor) {
+    baseColor.copy(sourceMaterial.color);
+  }
+
+  const material = new MeshStandardNodeMaterial({
+    roughness: config.roughness,
+    metalness: config.metalness,
+  });
+  material.side = DoubleSide;
+
+  const uniforms = {
+    progress: uniform(0),
+    edge: uniform(config.edge),
+    frequency: uniform(config.frequency),
+    noiseOffset: uniform(vec3(0, config.noiseOffsetY, 0)),
+    baseColor: uniform(baseColor),
+    particles: {
+      size: uniform(config.particleSize),
+      speed: uniform(config.particleSpeed),
+      decayFrequency: uniform(config.decayFrequency),
+      decayDistance: uniform(config.decayDistance),
+      color: uniform(new Color(config.particleColor)),
+    },
+  };
+
+  const noise = Fn(() => {
+    const sample = positionLocal.add(uniforms.noiseOffset).mul(uniforms.frequency);
+    return mx_fractal_noise_float(sample, 4, 2, 0.5, 1);
+  })();
+
+  const mappedProgress = float(1)
+    .sub(uniforms.progress)
+    .remap(0, 1, -1, 1)
+    .toVar("mappedProgress");
+  const edgeWidth = mappedProgress.add(uniforms.edge).toVar("edgeWidth");
+  const isEdge = noise
+    .greaterThan(mappedProgress)
+    .and(noise.lessThan(edgeWidth))
+    .toVar("isEdge");
+
+  material.emissiveNode = select(isEdge, uniforms.particles.color, vec3(0));
+  material.colorNode = Fn(() => {
+    Discard(noise.lessThan(mappedProgress));
+    return select(
+      isEdge,
+      vec4(uniforms.particles.color, 1),
+      vec4(uniforms.baseColor, 1)
+    );
+  })();
+
+  mesh.material = material;
+
+  const particlesMaterial = new SpriteNodeMaterial({
+    transparent: true,
+    depthWrite: false,
+    sizeAttenuation: true,
+    blending: AdditiveBlending,
+  });
+
+  const particleCount = Math.max(1, config.particleCount);
+  const particlesMesh = new InstancedMesh(new PlaneGeometry(), particlesMaterial, particleCount);
+  mesh.add(particlesMesh);
+
+  const sampler = new MeshSurfaceSampler(mesh).build();
+  const samplePosition = new Vector3();
+  const positions = new Float32Array(particleCount * 3);
+
+  for (let i = 0; i < particleCount; i += 1) {
+    sampler.sample(samplePosition);
+    positions[i * 3] = samplePosition.x;
+    positions[i * 3 + 1] = samplePosition.y;
+    positions[i * 3 + 2] = samplePosition.z;
+  }
+
+  const particlesBasePositionsBuffer = instancedArray(positions, "vec3");
+  const particlesPositionsBuffer = instancedArray(positions, "vec3");
+  const particlesVelocitiesBuffer = instancedArray(particleCount * 3, "vec3");
+  const particlesLifeBuffer = instancedArray(particleCount, "float");
+
+  renderer.computeAsync(
+    Fn(() => {
+      particlesVelocitiesBuffer.element(instanceIndex).assign(vec3(0));
+      particlesLifeBuffer.element(instanceIndex).assign(hash(instanceIndex));
+    })().compute(particleCount)
+  );
+
+  particlesMaterial.positionNode = Fn(() => {
+    const life = particlesLifeBuffer.element(instanceIndex);
+    const velocity = particlesVelocitiesBuffer.element(instanceIndex);
+    const basePositionNode = particlesBasePositionsBuffer.element(instanceIndex);
+    const positionNode = particlesPositionsBuffer.element(instanceIndex);
+
+    const newPosition = positionNode.toVar("newPosition");
+    const newLife = life.toVar("newLife");
+    const newVelocity = velocity.toVar("newVelocity");
+
+    const xWave1 = sin(newPosition.y.mul(20)).mul(0.8);
+    const xWave2 = sin(newPosition.y.mul(50)).mul(0.7);
+    newVelocity.addAssign(vec3(xWave1.add(xWave2), 1, 0).mul(deltaTime.mul(uniforms.particles.speed)));
+    newPosition.addAssign(newVelocity);
+
+    const distanceDecay = basePositionNode
+      .distance(positionNode)
+      .remapClamp(0, 1, uniforms.particles.decayDistance, 1);
+
+    newLife.assign(
+      life
+        .add(deltaTime.mul(uniforms.particles.decayFrequency).mul(distanceDecay))
+    );
+
+    If(newLife.greaterThan(1), () => {
+      newPosition.assign(basePositionNode);
+      newVelocity.assign(vec3(0));
+    });
+
+    newLife.assign(newLife.mod(1));
+
+    positionNode.assign(newPosition);
+    velocity.assign(newVelocity);
+    life.assign(newLife);
+
+    return positionNode;
+  })().compute(particleCount);
+
+  particlesMaterial.scaleNode = Fn(() => {
+    const life = particlesLifeBuffer.element(instanceIndex);
+    return float(0.05)
+      .mul(uniforms.particles.size)
+      .mul(hash(instanceIndex).mul(0.4).add(0.6))
+      .mul(min(life.smoothstep(0, 0.1), life.smoothstep(0.5, 1).oneMinus()));
+  })();
+
+  particlesMaterial.colorNode = Fn(() => {
+    Discard(isEdge.not());
+
+    const distanceToCenter = length(uv().sub(0.5));
+    const value = 0.05;
+    const alpha = float(value)
+      .div(distanceToCenter)
+      .sub(value * 2);
+
+    return vec4(uniforms.particles.color, alpha);
+  })();
+
+  return {
+    mesh,
+    particlesMesh,
+    uniforms,
+    dispose() {
+      particlesBasePositionsBuffer.dispose();
+      particlesPositionsBuffer.dispose();
+      particlesVelocitiesBuffer.dispose();
+      particlesLifeBuffer.dispose();
+      if (particlesMesh.parent) {
+        particlesMesh.parent.remove(particlesMesh);
+      }
+      particlesMesh.geometry.dispose();
+      particlesMaterial.dispose();
+      material.dispose();
     },
   };
 }
@@ -483,9 +478,7 @@ export function initHeroDissolve({
   }
 
   const THREE = threeRoot.THREE;
-  const TSL = window.HeroThree?.TSL || null;
-  const GLTFLoader = window.HeroThree?.GLTFLoader || window.GLTFLoader;
-  const backend = window.HeroThree?.backend || "webgl";
+  const { WEBGPU, TSL, MeshSurfaceSampler, GLTFLoader, backend } = getWebGPUContext();
 
   const group = new THREE.Group();
   group.visible = false;
@@ -493,19 +486,15 @@ export function initHeroDissolve({
   let initialized = false;
   let visibleAmount = 0;
   let currentProgress = 0;
-
   let fallback = null;
-  let useFallback = false;
-
   let dissolveRoot = null;
-  let dissolveNodes = [];
-  let dissolveMeshes = [];
-  let particleLayer = null;
-  let edgeColor = new THREE.Color(DISSOLVE_CONFIG.edgeColor);
+  let dissolveParts = [];
   let debugUI = null;
   let manualProgressEnabled = false;
   let manualProgressValue = 0;
-  let renderFallbackActive = false;
+  let pointLight1 = null;
+  let pointLight2 = null;
+  let lastTickTime = performance.now() * 0.001;
 
   const cues = createCueController({
     scopeEl: cueScopeEl,
@@ -514,80 +503,74 @@ export function initHeroDissolve({
   });
 
   function buildFallback() {
-    useFallback = true;
     fallback = createFallbackPlane(THREE, FALLBACK_COLORS);
     group.add(fallback.mesh);
   }
 
-  function setMaterialCheckpoint(value) {
-    DISSOLVE_CONFIG.materialCheckpoint = Math.min(3, Math.max(1, Math.round(value)));
-
-    dissolveNodes.forEach((node) => {
-      applyCheckpointGraph(
-        TSL,
-        node.material,
-        node.uniforms,
-        DISSOLVE_CONFIG.materialCheckpoint
-      );
-      node.material.needsUpdate = true;
+  function applyConfigToDissolve() {
+    dissolveParts.forEach((part) => {
+      part.uniforms.edge.value = DISSOLVE_CONFIG.edge;
+      part.uniforms.frequency.value = DISSOLVE_CONFIG.frequency;
+      part.uniforms.noiseOffset.value.y = DISSOLVE_CONFIG.noiseOffsetY;
+      part.uniforms.particles.size.value = DISSOLVE_CONFIG.particleSize;
+      part.uniforms.particles.speed.value = DISSOLVE_CONFIG.particleSpeed;
+      part.uniforms.particles.decayFrequency.value = DISSOLVE_CONFIG.decayFrequency;
+      part.uniforms.particles.decayDistance.value = DISSOLVE_CONFIG.decayDistance;
+      part.uniforms.particles.color.value.set(DISSOLVE_CONFIG.particleColor);
     });
 
-    if (DEBUG_HERO) {
-      console.log(
-        "[Hero][Dissolve][Checkpoint] active:",
-        DISSOLVE_CONFIG.materialCheckpoint
-      );
-    }
+    threeRoot.setPostFXPreset?.("dissolve", {
+      bloomStrength: DISSOLVE_CONFIG.bloomStrength,
+      bloomRadius: DISSOLVE_CONFIG.bloomRadius,
+      bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
+    });
   }
 
-  async function initWebGPUDissolve() {
+  async function initAdvancedDissolve() {
     const gltf = await loadGLTFWithFallback(GLTFLoader, DISSOLVE_CONFIG.modelUrls);
-
     dissolveRoot = gltf.scene;
     dissolveRoot.updateMatrixWorld(true);
 
     fitModelToCamera(THREE, dissolveRoot, threeRoot.camera);
 
-    const lit = new THREE.DirectionalLight(0xffffff, 1.4);
-    lit.position.set(1.6, 1.2, 2.3);
-    group.add(lit);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.4);
+    directionalLight.position.set(1, 1, 1);
+    group.add(directionalLight);
 
-    const ambient = new THREE.AmbientLight(0x777777, 0.9);
-    group.add(ambient);
-
-    const rim = new THREE.PointLight(0xbc6dff, 1.8, 8);
-    rim.position.set(-1.8, 1.1, 1.6);
-    group.add(rim);
-
-    const meshes = [];
+    pointLight1 = new THREE.PointLight(0xff6b6b, 1.5, 10);
+    pointLight2 = new THREE.PointLight(0x4ecdc4, 1.5, 10);
+    group.add(pointLight1);
+    group.add(pointLight2);
 
     dissolveRoot.traverse((child) => {
-      if (child.isMesh && child.geometry) {
-        // Node-based lit materials require valid normals.
-        if (!child.geometry.attributes?.normal && typeof child.geometry.computeVertexNormals === "function") {
-          child.geometry.computeVertexNormals();
-        }
-
-        const result = createDissolveMaterial(THREE, TSL, child.material, DISSOLVE_CONFIG);
-        child.material = result.material;
-        dissolveNodes.push({
-          material: result.material,
-          uniforms: result.uniforms,
-        });
-        meshes.push(child);
+      if (!child.isMesh || !child.geometry) {
+        return;
       }
+
+      if (!child.geometry.attributes?.normal && typeof child.geometry.computeVertexNormals === "function") {
+        child.geometry.computeVertexNormals();
+      }
+
+      const dissolvePart = createReferenceDissolveMesh({
+        THREE,
+        WEBGPU,
+        TSL,
+        MeshSurfaceSampler,
+        renderer: threeRoot.renderer,
+        mesh: child,
+        sourceMaterial: child.material,
+        config: DISSOLVE_CONFIG,
+      });
+
+      dissolveParts.push(dissolvePart);
     });
 
-    if (!meshes.length) {
-      throw new Error("No mesh found in dissolve model");
+    if (!dissolveParts.length) {
+      throw new Error("No renderable mesh found for dissolve");
     }
-    dissolveMeshes = meshes;
-    setMaterialCheckpoint(DISSOLVE_CONFIG.materialCheckpoint);
 
     group.add(dissolveRoot);
-
-    particleLayer = createParticleLayer(THREE, meshes, DISSOLVE_CONFIG);
-    group.add(particleLayer.points);
+    applyConfigToDissolve();
   }
 
   function init() {
@@ -604,41 +587,37 @@ export function initHeroDissolve({
 
     const canUseAdvanced =
       backend === "webgpu" &&
-      Boolean(TSL?.MeshBasicNodeMaterial) &&
-      Boolean(TSL?.uniform) &&
-      Boolean(TSL?.mx_fractal_noise_float) &&
-      Boolean(TSL?.clamp) &&
-      Boolean(TSL?.positionLocal) &&
-      Boolean(TSL?.smoothstep) &&
-      Boolean(TSL?.oneMinus) &&
-      Boolean(TSL?.mix) &&
-      Boolean(TSL?.abs) &&
-      Boolean(GLTFLoader);
+      GLTFLoader &&
+      MeshSurfaceSampler &&
+      WEBGPU?.MeshStandardNodeMaterial &&
+      WEBGPU?.SpriteNodeMaterial &&
+      WEBGPU?.InstancedMesh &&
+      TSL?.Fn &&
+      TSL?.uniform &&
+      TSL?.mx_fractal_noise_float;
 
     if (!canUseAdvanced) {
       if (DEBUG_HERO) {
         console.warn("[Hero][Dissolve] advanced dissolve unavailable, using fallback plane");
       }
       buildFallback();
-      return;
+    } else {
+      void initAdvancedDissolve().catch((error) => {
+        if (DEBUG_HERO) {
+          console.error("[Hero][Dissolve] advanced dissolve init failed, using fallback", error);
+        }
+
+        if (dissolveRoot && dissolveRoot.parent) {
+          dissolveRoot.parent.remove(dissolveRoot);
+        }
+        dissolveRoot = null;
+        dissolveParts = [];
+
+        if (!fallback) {
+          buildFallback();
+        }
+      });
     }
-
-    void initWebGPUDissolve().catch((error) => {
-      if (DEBUG_HERO) {
-        console.error("[Hero][Dissolve] advanced dissolve init failed, using fallback", error);
-      }
-
-      if (dissolveRoot && dissolveRoot.parent) {
-        dissolveRoot.parent.remove(dissolveRoot);
-      }
-
-      dissolveRoot = null;
-      dissolveNodes = [];
-
-      if (!fallback) {
-        buildFallback();
-      }
-    });
 
     if (!debugUI) {
       debugUI = createDissolveDebugUI(DISSOLVE_CONFIG, {
@@ -648,59 +627,41 @@ export function initHeroDissolve({
         onManualProgress(value) {
           manualProgressValue = value;
         },
-        onCheckpoint(value) {
-          setMaterialCheckpoint(value);
-        },
         onEdge(value) {
           DISSOLVE_CONFIG.edge = value;
-          dissolveNodes.forEach((node) => {
-            node.uniforms.edge.value = value;
-          });
+          applyConfigToDissolve();
         },
         onFrequency(value) {
           DISSOLVE_CONFIG.frequency = value;
-          dissolveNodes.forEach((node) => {
-            node.uniforms.frequency.value = value;
-          });
+          applyConfigToDissolve();
         },
         onNoiseOffsetY(value) {
-          dissolveNodes.forEach((node) => {
-            node.uniforms.noiseOffset.value.y = value;
-          });
+          DISSOLVE_CONFIG.noiseOffsetY = value;
+          applyConfigToDissolve();
         },
         onParticleSize(value) {
           DISSOLVE_CONFIG.particleSize = value;
-          if (particleLayer) particleLayer.material.size = value;
+          applyConfigToDissolve();
         },
         onParticleSpeed(value) {
           DISSOLVE_CONFIG.particleSpeed = value;
+          applyConfigToDissolve();
         },
-        onParticleBand(value) {
-          DISSOLVE_CONFIG.particleBand = value;
+        onDecayFrequency(value) {
+          DISSOLVE_CONFIG.decayFrequency = value;
+          applyConfigToDissolve();
         },
         onBloomStrength(value) {
           DISSOLVE_CONFIG.bloomStrength = value;
-          threeRoot.setPostFXPreset?.("dissolve", {
-            bloomStrength: DISSOLVE_CONFIG.bloomStrength,
-            bloomRadius: DISSOLVE_CONFIG.bloomRadius,
-            bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
-          });
+          applyConfigToDissolve();
         },
         onBloomRadius(value) {
           DISSOLVE_CONFIG.bloomRadius = value;
-          threeRoot.setPostFXPreset?.("dissolve", {
-            bloomStrength: DISSOLVE_CONFIG.bloomStrength,
-            bloomRadius: DISSOLVE_CONFIG.bloomRadius,
-            bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
-          });
+          applyConfigToDissolve();
         },
         onBloomThreshold(value) {
           DISSOLVE_CONFIG.bloomThreshold = value;
-          threeRoot.setPostFXPreset?.("dissolve", {
-            bloomStrength: DISSOLVE_CONFIG.bloomStrength,
-            bloomRadius: DISSOLVE_CONFIG.bloomRadius,
-            bloomThreshold: DISSOLVE_CONFIG.bloomThreshold,
-          });
+          applyConfigToDissolve();
         },
       });
     }
@@ -735,46 +696,30 @@ export function initHeroDissolve({
       return;
     }
 
-    if (!dissolveNodes.length) {
-      if (renderFallbackActive && dissolveMeshes.length) {
-        dissolveMeshes.forEach((mesh) => {
-          if (!mesh.material) return;
-          mesh.material.opacity = visibleAmount * (0.12 + p * 0.88);
-          mesh.material.transparent = true;
-        });
-      }
-      return;
-    }
-
-    dissolveNodes.forEach((node) => {
-      node.uniforms.progress.value = p;
+    dissolveParts.forEach((part) => {
+      part.uniforms.progress.value = p;
     });
-
-    if (particleLayer) {
-      updateParticleLayer(
-        particleLayer,
-        p,
-        performance.now() * 0.001,
-        DISSOLVE_CONFIG,
-        edgeColor,
-        visibleAmount
-      );
-    }
   }
 
   function tick() {
-    if (!initialized || !group.visible || !particleLayer || fallback || renderFallbackActive) {
+    if (!initialized || !group.visible || fallback || !pointLight1 || !pointLight2) {
       return;
     }
 
-    updateParticleLayer(
-      particleLayer,
-      currentProgress,
-      performance.now() * 0.001,
-      DISSOLVE_CONFIG,
-      edgeColor,
-      visibleAmount
-    );
+    const now = performance.now() * 0.001;
+    lastTickTime = now;
+
+    const time = now * 0.8;
+    const radius = 4;
+
+    pointLight1.position.x = radius * Math.sin(time);
+    pointLight1.position.y = radius * Math.sin(time) * Math.cos(time);
+    pointLight1.position.z = 0;
+
+    pointLight2.position.x = radius * Math.sin(time + Math.PI + 0.3);
+    pointLight2.position.y =
+      radius * Math.sin(time + Math.PI + 0.3) * Math.cos(time + Math.PI + 0.3);
+    pointLight2.position.z = 0;
   }
 
   function show() {
@@ -787,9 +732,6 @@ export function initHeroDissolve({
 
     if (fallback) {
       fallback.material.opacity = visibleAmount;
-    }
-    if (particleLayer) {
-      particleLayer.material.opacity = visibleAmount;
     }
 
     threeRoot.setPostFXPreset?.("dissolve", {
@@ -809,9 +751,6 @@ export function initHeroDissolve({
     if (fallback) {
       fallback.material.opacity = 0;
     }
-    if (particleLayer) {
-      particleLayer.material.opacity = 0;
-    }
 
     group.visible = false;
     threeRoot.clearPostFXPreset?.();
@@ -830,36 +769,25 @@ export function initHeroDissolve({
       fallback = null;
     }
 
-    if (particleLayer) {
-      particleLayer.geometry.dispose();
-      particleLayer.material.dispose();
-      if (particleLayer.points.parent) {
-        particleLayer.points.parent.remove(particleLayer.points);
-      }
-      particleLayer = null;
+    dissolveParts.forEach((part) => {
+      part.dispose();
+    });
+    dissolveParts = [];
+
+    if (dissolveRoot && dissolveRoot.parent) {
+      dissolveRoot.parent.remove(dissolveRoot);
+      dissolveRoot = null;
     }
 
-    if (dissolveRoot) {
-      dissolveRoot.traverse((child) => {
-        if (child.isMesh && child.material?.dispose) {
-          child.material.dispose();
-        }
-      });
-
-      if (dissolveRoot.parent) {
-        dissolveRoot.parent.remove(dissolveRoot);
-      }
-      dissolveRoot = null;
-      dissolveMeshes = [];
+    if (debugUI) {
+      debugUI.destroy();
+      debugUI = null;
     }
 
     if (group.parent) {
       group.parent.remove(group);
     }
-    if (debugUI) {
-      debugUI.destroy();
-      debugUI = null;
-    }
+
     threeRoot.clearPostFXPreset?.();
   }
 
@@ -870,37 +798,6 @@ export function initHeroDissolve({
     show,
     hide,
     resize() {},
-    onRenderError(error) {
-      if (renderFallbackActive || !dissolveRoot) {
-        return;
-      }
-      renderFallbackActive = true;
-      dissolveNodes = [];
-
-      if (DEBUG_HERO) {
-        console.warn("[Hero][Dissolve] switching to safe material fallback after render error", error);
-      }
-
-      dissolveRoot.traverse((child) => {
-        if (!child.isMesh || !child.geometry) return;
-        if (child.material?.dispose) {
-          child.material.dispose();
-        }
-        child.material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(DISSOLVE_CONFIG.baseColor),
-          emissive: new THREE.Color(DISSOLVE_CONFIG.edgeColor).multiplyScalar(0.35),
-          roughness: 0.35,
-          metalness: 0.75,
-          transparent: true,
-          opacity: visibleAmount,
-          side: THREE.DoubleSide,
-        });
-      });
-
-      if (particleLayer) {
-        particleLayer.material.opacity = 0;
-      }
-    },
     destroy,
     get initialized() {
       return initialized;

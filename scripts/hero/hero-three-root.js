@@ -46,6 +46,15 @@ function resolveRendererConfig() {
 
 export function initHeroThreeRoot({ mountEl } = {}) {
   const config = resolveRendererConfig();
+  const heroThree = window.HeroThree || {};
+  const WEBGPU = {
+    ...(heroThree.rawWebGPUModule || {}),
+    ...(heroThree.WEBGPU || {}),
+  };
+  const TSL = {
+    ...(heroThree.rawTSLModule || {}),
+    ...(heroThree.TSL || {}),
+  };
 
   if (DEBUG_HERO) {
     console.groupCollapsed("[Hero] ThreeRoot Init");
@@ -64,6 +73,8 @@ export function initHeroThreeRoot({ mountEl } = {}) {
       setActiveScene() {},
       resize() {},
       render() {},
+      setPostFXPreset() {},
+      clearPostFXPreset() {},
       destroy() {},
     };
   }
@@ -75,6 +86,10 @@ export function initHeroThreeRoot({ mountEl } = {}) {
   let activeScene = null;
   let rafId = 0;
   let hasRenderError = false;
+  let postProcessing = null;
+  let bloomPass = null;
+  let activePostFXPreset = null;
+  let postFXBusy = false;
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
@@ -99,6 +114,65 @@ export function initHeroThreeRoot({ mountEl } = {}) {
   renderer.setPixelRatio(initialDpr);
   renderer.setSize(initialWidth, initialHeight);
 
+  function buildPostProcessing() {
+    if (config.backend !== "webgpu") {
+      return;
+    }
+
+    const PostProcessing = WEBGPU?.PostProcessing || null;
+    const fxaa = heroThree?.fxaa || null;
+    const bloom = heroThree?.bloom || null;
+    const pass = TSL?.pass || null;
+    const mrt = TSL?.mrt || null;
+    const output = TSL?.output || null;
+    const emissive = TSL?.emissive || null;
+    const renderOutput = TSL?.renderOutput || null;
+
+    if (!PostProcessing || !fxaa || !bloom || !pass || !mrt || !output || !emissive || !renderOutput) {
+      return;
+    }
+
+    try {
+      postProcessing = new PostProcessing(renderer);
+      postProcessing.outputColorTransform = false;
+
+      const scenePass = pass(scene, camera);
+      scenePass.setMRT(
+        mrt({
+          output,
+          emissive,
+        })
+      );
+
+      const outputPass = renderOutput(scenePass);
+      const fxaaPass = fxaa(outputPass);
+      bloomPass = bloom(scenePass.getTextureNode("emissive"), 1.5, 0.2, 0.1);
+      postProcessing.outputNode = fxaaPass.add(bloomPass);
+    } catch (error) {
+      postProcessing = null;
+      bloomPass = null;
+      if (DEBUG_HERO) {
+        console.warn("[Hero][ThreeRoot] postprocessing disabled", error);
+      }
+    }
+  }
+
+  function applyPostFXPreset() {
+    if (!bloomPass || !activePostFXPreset) {
+      return;
+    }
+
+    if (bloomPass.strength) {
+      bloomPass.strength.value = activePostFXPreset.bloomStrength;
+    }
+    if (bloomPass.radius) {
+      bloomPass.radius.value = activePostFXPreset.bloomRadius;
+    }
+    if (bloomPass.threshold) {
+      bloomPass.threshold.value = activePostFXPreset.bloomThreshold;
+    }
+  }
+
   function attachCanvas() {
     if (renderer.domElement && !mountEl.contains(renderer.domElement)) {
       mountEl.appendChild(renderer.domElement);
@@ -118,7 +192,23 @@ export function initHeroThreeRoot({ mountEl } = {}) {
       return;
     }
     try {
-      renderer.render(scene, camera);
+      if (postProcessing && activePostFXPreset) {
+        if (typeof postProcessing.render === "function") {
+          postProcessing.render();
+        } else if (typeof postProcessing.renderAsync === "function") {
+          if (postFXBusy) {
+            return;
+          }
+          postFXBusy = true;
+          postProcessing.renderAsync().finally(() => {
+            postFXBusy = false;
+          });
+        } else {
+          renderer.render(scene, camera);
+        }
+      } else {
+        renderer.render(scene, camera);
+      }
       hasRenderError = false;
     } catch (error) {
       if (!hasRenderError && DEBUG_HERO) {
@@ -161,6 +251,7 @@ export function initHeroThreeRoot({ mountEl } = {}) {
         return;
       }
 
+      buildPostProcessing();
       attachCanvas();
       isReady = true;
       ensureLoop();
@@ -212,6 +303,16 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     setActiveScene,
     resize,
     render,
+    setPostFXPreset(name, preset) {
+      if (!name || !preset) {
+        return;
+      }
+      activePostFXPreset = preset;
+      applyPostFXPreset();
+    },
+    clearPostFXPreset() {
+      activePostFXPreset = null;
+    },
     destroy() {
       if (isDestroyed) {
         return;

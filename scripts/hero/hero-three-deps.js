@@ -8,16 +8,13 @@ function getModuleSpecs(useBareSpecifiers) {
   if (useBareSpecifiers) {
     return {
       three: ["three"],
-      webgpu: [
-        "three/webgpu",
-        "three/addons/renderers/webgpu/WebGPURenderer.js",
-      ],
-      tsl: [
-        "three/tsl",
-        "three/addons/nodes/Nodes.js",
-      ],
+      webgpu: ["three/webgpu"],
+      tsl: ["three/tsl"],
       webgpuCap: ["three/addons/capabilities/WebGPU.js"],
       gltfLoader: ["three/addons/loaders/GLTFLoader.js"],
+      meshSurfaceSampler: ["three/addons/math/MeshSurfaceSampler.js"],
+      fxaaNode: ["three/addons/tsl/display/FXAANode.js"],
+      bloomNode: ["three/addons/tsl/display/BloomNode.js"],
       effectComposer: ["three/addons/postprocessing/EffectComposer.js"],
       renderPass: ["three/addons/postprocessing/RenderPass.js"],
       unrealBloomPass: ["three/addons/postprocessing/UnrealBloomPass.js"],
@@ -26,10 +23,13 @@ function getModuleSpecs(useBareSpecifiers) {
 
   return {
     three: [`${ESM_BASE}`],
-    webgpu: [`${ESM_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`],
-    tsl: [`${ESM_BASE}/examples/jsm/nodes/Nodes.js`],
+    webgpu: [`${ESM_BASE}/webgpu`],
+    tsl: [`${ESM_BASE}/tsl`],
     webgpuCap: [`${ESM_BASE}/examples/jsm/capabilities/WebGPU.js`],
     gltfLoader: [`${ESM_BASE}/examples/jsm/loaders/GLTFLoader.js`],
+    meshSurfaceSampler: [`${ESM_BASE}/examples/jsm/math/MeshSurfaceSampler.js`],
+    fxaaNode: [`${ESM_BASE}/examples/jsm/tsl/display/FXAANode.js`],
+    bloomNode: [`${ESM_BASE}/examples/jsm/tsl/display/BloomNode.js`],
     effectComposer: [`${ESM_BASE}/examples/jsm/postprocessing/EffectComposer.js`],
     renderPass: [`${ESM_BASE}/examples/jsm/postprocessing/RenderPass.js`],
     unrealBloomPass: [`${ESM_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`],
@@ -147,6 +147,9 @@ async function loadWebGPUDeps() {
   const tslMod = await importFirst(specs.tsl);
   const capMod = await importFirst(specs.webgpuCap);
   const gltfMod = await importFirst(specs.gltfLoader);
+  const samplerMod = await importFirst(specs.meshSurfaceSampler);
+  const fxaaMod = await importFirst(specs.fxaaNode);
+  const bloomMod = await importFirst(specs.bloomNode);
 
   const THREE = normalizeModule(threeMod);
   const WEBGPU = normalizeModule(webgpuMod);
@@ -169,8 +172,14 @@ async function loadWebGPUDeps() {
     THREE,
     WEBGPU,
     TSL,
+    rawWebGPUModule: webgpuMod,
+    rawTSLModule: tslMod,
     WebGPURenderer: rendererCtor,
     GLTFLoader: gltfMod.GLTFLoader,
+    MeshSurfaceSampler: samplerMod.MeshSurfaceSampler,
+    fxaa: fxaaMod.fxaa,
+    BloomNode: bloomMod.default || bloomMod.BloomNode || null,
+    bloom: bloomMod.bloom || null,
   };
 
   // Keep legacy globals while migrating modules.
