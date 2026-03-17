@@ -5,6 +5,7 @@ import { initHeroThreeRoot } from "./hero-three-root.js";
 import { clamp, mapRange, normalizeRange, rafThrottle } from "../utils.js";
 
 const DEBUG_HERO = true;
+const STAGE_SWITCH_HYSTERESIS = 0.004;
 
 const DEFAULT_CONFIG = {
   triggerSelector: "[data-hero-sequence]",
@@ -186,12 +187,30 @@ export function initHeroOrchestrator(userConfig = {}) {
   };
   let lastProgressBucket = -1;
 
-  function getCurrentStage(progress) {
-    if (progress < config.ranges.video[1]) {
-      return "video";
+  function getCurrentStage(progress, currentStage) {
+    const videoEnd = config.ranges.video[1];
+    const dissolveEnd = config.ranges.dissolve[1];
+    const h = STAGE_SWITCH_HYSTERESIS;
+
+    if (currentStage === "video") {
+      if (progress < videoEnd + h) {
+        return "video";
+      }
+      return progress < dissolveEnd ? "dissolve" : "tunnel";
     }
-    if (progress < config.ranges.dissolve[1]) {
-      return "dissolve";
+
+    if (currentStage === "dissolve") {
+      if (progress < videoEnd - h) {
+        return "video";
+      }
+      if (progress < dissolveEnd + h) {
+        return "dissolve";
+      }
+      return "tunnel";
+    }
+
+    if (progress < dissolveEnd - h) {
+      return progress < videoEnd ? "video" : "dissolve";
     }
     return "tunnel";
   }
@@ -273,7 +292,7 @@ export function initHeroOrchestrator(userConfig = {}) {
     const videoProgress = getStageProgress(p, config.ranges.video);
     const dissolveProgress = getStageProgress(p, config.ranges.dissolve);
     const tunnelProgress = getStageProgress(p, config.ranges.tunnel);
-    const nextStage = getCurrentStage(p);
+    const nextStage = getCurrentStage(p, stageState.currentStage);
     const progressBucket = Math.floor(p * 10);
     if (DEBUG_HERO && progressBucket !== lastProgressBucket) {
       lastProgressBucket = progressBucket;
