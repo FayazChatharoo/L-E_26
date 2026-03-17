@@ -2,7 +2,7 @@ import { clamp, createCueController } from "../utils.js";
 
 // Dissolve stage visual settings.
 const DISSOLVE_CONFIG = {
-  modelUrl: "/ASSETS/dissolve.glb",
+  modelUrl: "https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb",
   fallbackModelUrl: "/scripts/ASSETS/dissolve.glb",
   camera: {
     fov: 40,
