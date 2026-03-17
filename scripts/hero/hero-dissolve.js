@@ -4,6 +4,7 @@ const DEBUG_HERO = true;
 
 const DISSOLVE_CONFIG = {
   modelUrls: ["https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb", "/scripts/ASSETS/dissolve.glb"],
+  materialCheckpoint: 3,
   edge: 0.06,
   frequency: 1.35,
   roughness: 0.2,
@@ -123,6 +124,48 @@ function fitModelToCamera(THREE, root, camera) {
   }
 }
 
+function applyCheckpointGraph(TSL, material, uniforms, checkpoint) {
+  const safeCheckpoint = Math.min(3, Math.max(1, Math.round(checkpoint || 1)));
+
+  if (safeCheckpoint === 1) {
+    material.colorNode = uniforms.baseColor;
+    material.opacityNode = null;
+    material.alphaTest = 0;
+    return safeCheckpoint;
+  }
+
+  if (safeCheckpoint === 2) {
+    material.colorNode = uniforms.baseColor;
+    material.opacityNode = TSL.clamp(uniforms.progress, 0, 1);
+    material.alphaTest = 0;
+    return safeCheckpoint;
+  }
+
+  const noiseInput = TSL.positionLocal
+    .mul(uniforms.frequency)
+    .add(uniforms.noiseOffset);
+
+  const noiseRaw = TSL.mx_fractal_noise_float(noiseInput, 4, 2, 0.5, 1);
+  const noise = noiseRaw.mul(0.5).add(0.5);
+
+  const revealProgress = uniforms.progress.mul(1.25).sub(0.1);
+  const dissolveMask = TSL.smoothstep(
+    noise.sub(uniforms.edge),
+    noise.add(uniforms.edge),
+    revealProgress
+  );
+  const visibilityFloor = uniforms.progress.mul(0.24);
+  const visibleMask = TSL.max(dissolveMask, visibilityFloor);
+
+  const distanceToEdge = TSL.abs(noise.sub(revealProgress));
+  const edgeMask = TSL.oneMinus(TSL.smoothstep(0.0, uniforms.edge, distanceToEdge));
+
+  material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor.mul(1.7), edgeMask.mul(0.9));
+  material.opacityNode = visibleMask;
+  material.alphaTest = 0.03;
+  return safeCheckpoint;
+}
+
 function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
   const baseColor = new THREE.Color(config.baseColor);
   if (originalMaterial?.color?.isColor) {
@@ -145,37 +188,17 @@ function createDissolveMaterial(THREE, TSL, originalMaterial, config) {
     baseColor: TSL.uniform(baseColor),
     edgeColor: TSL.uniform(new THREE.Color(config.edgeColor)),
   };
-
-  // Organic breakup in local/object space.
-  const noiseInput = TSL.positionLocal
-    .mul(uniforms.frequency)
-    .add(uniforms.noiseOffset);
-
-  // MaterialX fractal noise is available in Nodes.js and WebGPU-safe.
-  const noiseRaw = TSL.mx_fractal_noise_float(noiseInput, 4, 2, 0.5, 1);
-  const noise = noiseRaw.mul(0.5).add(0.5);
-
-  // Inverted reveal required by project:
-  // progress 0 => hidden, progress 1 => visible.
-  const revealProgress = uniforms.progress.mul(1.25).sub(0.1);
-  const dissolveMask = TSL.smoothstep(
-    noise.sub(uniforms.edge),
-    noise.add(uniforms.edge),
-    revealProgress
+  const checkpoint = applyCheckpointGraph(
+    TSL,
+    material,
+    uniforms,
+    config.materialCheckpoint
   );
-  const visibilityFloor = uniforms.progress.mul(0.24);
-  const visibleMask = TSL.max(dissolveMask, visibilityFloor);
-
-  const distanceToEdge = TSL.abs(noise.sub(revealProgress));
-  const edgeMask = TSL.oneMinus(TSL.smoothstep(0.0, uniforms.edge, distanceToEdge));
-
-  material.colorNode = TSL.mix(uniforms.baseColor, uniforms.edgeColor.mul(1.7), edgeMask.mul(0.9));
-  material.opacityNode = visibleMask;
-  material.alphaTest = 0.03;
 
   return {
     material,
     uniforms,
+    checkpoint,
   };
 }
 
@@ -414,6 +437,7 @@ function createDissolveDebugUI(config, handlers) {
   panel.appendChild(manualWrap);
 
   addRow("progress", 0, 1, 0.001, 0, handlers.onManualProgress);
+  addRow("checkpoint", 1, 3, 1, config.materialCheckpoint, handlers.onCheckpoint);
   addRow("edge", 0.005, 0.25, 0.001, config.edge, handlers.onEdge);
   addRow("frequency", 0.1, 8, 0.01, config.frequency, handlers.onFrequency);
   addRow("noiseOffsetY", -10, 10, 0.01, 2.6, handlers.onNoiseOffsetY);
@@ -474,7 +498,7 @@ export function initHeroDissolve({
   let useFallback = false;
 
   let dissolveRoot = null;
-  let dissolveUniforms = [];
+  let dissolveNodes = [];
   let dissolveMeshes = [];
   let particleLayer = null;
   let edgeColor = new THREE.Color(DISSOLVE_CONFIG.edgeColor);
@@ -493,6 +517,27 @@ export function initHeroDissolve({
     useFallback = true;
     fallback = createFallbackPlane(THREE, FALLBACK_COLORS);
     group.add(fallback.mesh);
+  }
+
+  function setMaterialCheckpoint(value) {
+    DISSOLVE_CONFIG.materialCheckpoint = Math.min(3, Math.max(1, Math.round(value)));
+
+    dissolveNodes.forEach((node) => {
+      applyCheckpointGraph(
+        TSL,
+        node.material,
+        node.uniforms,
+        DISSOLVE_CONFIG.materialCheckpoint
+      );
+      node.material.needsUpdate = true;
+    });
+
+    if (DEBUG_HERO) {
+      console.log(
+        "[Hero][Dissolve][Checkpoint] active:",
+        DISSOLVE_CONFIG.materialCheckpoint
+      );
+    }
   }
 
   async function initWebGPUDissolve() {
@@ -525,7 +570,10 @@ export function initHeroDissolve({
 
         const result = createDissolveMaterial(THREE, TSL, child.material, DISSOLVE_CONFIG);
         child.material = result.material;
-        dissolveUniforms.push(result.uniforms);
+        dissolveNodes.push({
+          material: result.material,
+          uniforms: result.uniforms,
+        });
         meshes.push(child);
       }
     });
@@ -534,6 +582,7 @@ export function initHeroDissolve({
       throw new Error("No mesh found in dissolve model");
     }
     dissolveMeshes = meshes;
+    setMaterialCheckpoint(DISSOLVE_CONFIG.materialCheckpoint);
 
     group.add(dissolveRoot);
 
@@ -558,6 +607,7 @@ export function initHeroDissolve({
       Boolean(TSL?.MeshBasicNodeMaterial) &&
       Boolean(TSL?.uniform) &&
       Boolean(TSL?.mx_fractal_noise_float) &&
+      Boolean(TSL?.clamp) &&
       Boolean(TSL?.positionLocal) &&
       Boolean(TSL?.smoothstep) &&
       Boolean(TSL?.oneMinus) &&
@@ -583,7 +633,7 @@ export function initHeroDissolve({
       }
 
       dissolveRoot = null;
-      dissolveUniforms = [];
+      dissolveNodes = [];
 
       if (!fallback) {
         buildFallback();
@@ -598,21 +648,24 @@ export function initHeroDissolve({
         onManualProgress(value) {
           manualProgressValue = value;
         },
+        onCheckpoint(value) {
+          setMaterialCheckpoint(value);
+        },
         onEdge(value) {
           DISSOLVE_CONFIG.edge = value;
-          dissolveUniforms.forEach((u) => {
-            u.edge.value = value;
+          dissolveNodes.forEach((node) => {
+            node.uniforms.edge.value = value;
           });
         },
         onFrequency(value) {
           DISSOLVE_CONFIG.frequency = value;
-          dissolveUniforms.forEach((u) => {
-            u.frequency.value = value;
+          dissolveNodes.forEach((node) => {
+            node.uniforms.frequency.value = value;
           });
         },
         onNoiseOffsetY(value) {
-          dissolveUniforms.forEach((u) => {
-            u.noiseOffset.value.y = value;
+          dissolveNodes.forEach((node) => {
+            node.uniforms.noiseOffset.value.y = value;
           });
         },
         onParticleSize(value) {
@@ -682,7 +735,7 @@ export function initHeroDissolve({
       return;
     }
 
-    if (!dissolveUniforms.length) {
+    if (!dissolveNodes.length) {
       if (renderFallbackActive && dissolveMeshes.length) {
         dissolveMeshes.forEach((mesh) => {
           if (!mesh.material) return;
@@ -693,8 +746,8 @@ export function initHeroDissolve({
       return;
     }
 
-    dissolveUniforms.forEach((u) => {
-      u.progress.value = p;
+    dissolveNodes.forEach((node) => {
+      node.uniforms.progress.value = p;
     });
 
     if (particleLayer) {
@@ -822,7 +875,7 @@ export function initHeroDissolve({
         return;
       }
       renderFallbackActive = true;
-      dissolveUniforms = [];
+      dissolveNodes = [];
 
       if (DEBUG_HERO) {
         console.warn("[Hero][Dissolve] switching to safe material fallback after render error", error);
