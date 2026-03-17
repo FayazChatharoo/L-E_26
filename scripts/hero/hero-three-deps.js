@@ -1,6 +1,6 @@
 const DEBUG_HERO = true;
 
-const HERO_THREE_VERSION = "0.160.0";
+const HERO_THREE_VERSION = "0.171.0";
 const CDN_BASE = `https://cdn.jsdelivr.net/npm/three@${HERO_THREE_VERSION}`;
 const ESM_BASE = `https://esm.sh/three@${HERO_THREE_VERSION}`;
 
