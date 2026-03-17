@@ -4,50 +4,37 @@ const HERO_THREE_VERSION = "0.160.0";
 const CDN_BASE = `https://cdn.jsdelivr.net/npm/three@${HERO_THREE_VERSION}`;
 const ESM_BASE = `https://esm.sh/three@${HERO_THREE_VERSION}`;
 
-const MODULE_SPECS = {
-  three: [
-    `${CDN_BASE}/build/three.module.js`,
-    `${ESM_BASE}`,
-    "three",
-  ],
-  webgpu: [
-    `${ESM_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`,
-    `${CDN_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`,
-    "three/addons/renderers/webgpu/WebGPURenderer.js",
-    "three/webgpu",
-  ],
-  tsl: [
-    `${ESM_BASE}/examples/jsm/nodes/Nodes.js`,
-    `${CDN_BASE}/examples/jsm/nodes/Nodes.js`,
-    "three/addons/nodes/Nodes.js",
-    "three/tsl",
-  ],
-  webgpuCap: [
-    `${ESM_BASE}/examples/jsm/capabilities/WebGPU.js`,
-    "three/addons/capabilities/WebGPU.js",
-    `${CDN_BASE}/examples/jsm/capabilities/WebGPU.js`,
-  ],
-  gltfLoader: [
-    `${ESM_BASE}/examples/jsm/loaders/GLTFLoader.js`,
-    "three/addons/loaders/GLTFLoader.js",
-    `${CDN_BASE}/examples/jsm/loaders/GLTFLoader.js`,
-  ],
-  effectComposer: [
-    `${ESM_BASE}/examples/jsm/postprocessing/EffectComposer.js`,
-    "three/addons/postprocessing/EffectComposer.js",
-    `${CDN_BASE}/examples/jsm/postprocessing/EffectComposer.js`,
-  ],
-  renderPass: [
-    `${ESM_BASE}/examples/jsm/postprocessing/RenderPass.js`,
-    "three/addons/postprocessing/RenderPass.js",
-    `${CDN_BASE}/examples/jsm/postprocessing/RenderPass.js`,
-  ],
-  unrealBloomPass: [
-    `${ESM_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`,
-    "three/addons/postprocessing/UnrealBloomPass.js",
-    `${CDN_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`,
-  ],
-};
+function getModuleSpecs(useBareSpecifiers) {
+  if (useBareSpecifiers) {
+    return {
+      three: ["three"],
+      webgpu: [
+        "three/webgpu",
+        "three/addons/renderers/webgpu/WebGPURenderer.js",
+      ],
+      tsl: [
+        "three/tsl",
+        "three/addons/nodes/Nodes.js",
+      ],
+      webgpuCap: ["three/addons/capabilities/WebGPU.js"],
+      gltfLoader: ["three/addons/loaders/GLTFLoader.js"],
+      effectComposer: ["three/addons/postprocessing/EffectComposer.js"],
+      renderPass: ["three/addons/postprocessing/RenderPass.js"],
+      unrealBloomPass: ["three/addons/postprocessing/UnrealBloomPass.js"],
+    };
+  }
+
+  return {
+    three: [`${ESM_BASE}`],
+    webgpu: [`${ESM_BASE}/examples/jsm/renderers/webgpu/WebGPURenderer.js`],
+    tsl: [`${ESM_BASE}/examples/jsm/nodes/Nodes.js`],
+    webgpuCap: [`${ESM_BASE}/examples/jsm/capabilities/WebGPU.js`],
+    gltfLoader: [`${ESM_BASE}/examples/jsm/loaders/GLTFLoader.js`],
+    effectComposer: [`${ESM_BASE}/examples/jsm/postprocessing/EffectComposer.js`],
+    renderPass: [`${ESM_BASE}/examples/jsm/postprocessing/RenderPass.js`],
+    unrealBloomPass: [`${ESM_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`],
+  };
+}
 
 const BACKEND = {
   WEBGPU: "webgpu",
@@ -56,6 +43,7 @@ const BACKEND = {
 
 let depsPromise = null;
 let selectedBackend = null;
+let moduleSpecsPromise = null;
 
 async function importFirst(specifiers) {
   let lastError = null;
@@ -67,6 +55,26 @@ async function importFirst(specifiers) {
     }
   }
   throw lastError || new Error("Module import failed");
+}
+
+async function resolveModuleSpecs() {
+  if (moduleSpecsPromise) {
+    return moduleSpecsPromise;
+  }
+
+  moduleSpecsPromise = (async () => {
+    try {
+      await import(/* @vite-ignore */ "three");
+      return getModuleSpecs(true);
+    } catch (error) {
+      if (DEBUG_HERO) {
+        console.warn("[Hero][ThreeDeps] import map for bare 'three' not available, using esm.sh modules");
+      }
+      return getModuleSpecs(false);
+    }
+  })();
+
+  return moduleSpecsPromise;
 }
 
 function normalizeModule(mod) {
@@ -91,7 +99,20 @@ async function webgpuPreflight({ THREE, WEBGPU, rendererCtor }) {
 
   const canvas = document.createElement("canvas");
   let renderer = null;
-  let animationFrame = 0;
+  function safeDisposeRenderer() {
+    try {
+      if (renderer && typeof renderer.setAnimationLoop === "function") {
+        renderer.setAnimationLoop(null);
+      }
+      if (renderer && typeof renderer.dispose === "function") {
+        renderer.dispose();
+      }
+    } catch (disposeError) {
+      if (DEBUG_HERO) {
+        console.warn("[Hero][ThreeDeps] renderer dispose warning during preflight", disposeError);
+      }
+    }
+  }
 
   try {
     renderer = new rendererCtor({ canvas, alpha: true, antialias: true });
@@ -117,34 +138,20 @@ async function webgpuPreflight({ THREE, WEBGPU, rendererCtor }) {
     mesh.geometry.dispose();
     mesh.material.dispose();
 
-    if (typeof renderer.setAnimationLoop === "function") {
-      renderer.setAnimationLoop(null);
-    }
-
-    if (animationFrame) {
-      cancelAnimationFrame(animationFrame);
-    }
-
-    if (typeof renderer.dispose === "function") {
-      renderer.dispose();
-    }
+    safeDisposeRenderer();
   } catch (error) {
-    if (renderer && typeof renderer.setAnimationLoop === "function") {
-      renderer.setAnimationLoop(null);
-    }
-    if (renderer && typeof renderer.dispose === "function") {
-      renderer.dispose();
-    }
+    safeDisposeRenderer();
     throw error;
   }
 }
 
 async function loadWebGPUDeps() {
-  const threeMod = await importFirst(MODULE_SPECS.three);
-  const webgpuMod = await importFirst(MODULE_SPECS.webgpu);
-  const tslMod = await importFirst(MODULE_SPECS.tsl);
-  const capMod = await importFirst(MODULE_SPECS.webgpuCap);
-  const gltfMod = await importFirst(MODULE_SPECS.gltfLoader);
+  const specs = await resolveModuleSpecs();
+  const threeMod = await importFirst(specs.three);
+  const webgpuMod = await importFirst(specs.webgpu);
+  const tslMod = await importFirst(specs.tsl);
+  const capMod = await importFirst(specs.webgpuCap);
+  const gltfMod = await importFirst(specs.gltfLoader);
 
   const THREE = normalizeModule(threeMod);
   const WEBGPU = normalizeModule(webgpuMod);
@@ -179,11 +186,12 @@ async function loadWebGPUDeps() {
 }
 
 async function loadWebGLDeps() {
-  const threeMod = await importFirst(MODULE_SPECS.three);
-  const gltfMod = await importFirst(MODULE_SPECS.gltfLoader);
-  const composerMod = await importFirst(MODULE_SPECS.effectComposer);
-  const passMod = await importFirst(MODULE_SPECS.renderPass);
-  const bloomMod = await importFirst(MODULE_SPECS.unrealBloomPass);
+  const specs = await resolveModuleSpecs();
+  const threeMod = await importFirst(specs.three);
+  const gltfMod = await importFirst(specs.gltfLoader);
+  const composerMod = await importFirst(specs.effectComposer);
+  const passMod = await importFirst(specs.renderPass);
+  const bloomMod = await importFirst(specs.unrealBloomPass);
 
   const THREE = normalizeModule(threeMod);
 
