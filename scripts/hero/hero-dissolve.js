@@ -27,69 +27,44 @@ const DISSOLVE_CONFIG = {
 };
 
 const THREE_CDN = {
-  base: "https://cdn.jsdelivr.net/npm/three@0.160.0",
-  three: "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
-  gltfLoader:
-    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/loaders/GLTFLoader.js",
+  three: "https://esm.sh/three@0.160.0",
+  gltfLoader: "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
   effectComposer:
-    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/postprocessing/EffectComposer.js",
+    "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js",
   renderPass:
-    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/postprocessing/RenderPass.js",
+    "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/RenderPass.js",
   unrealBloomPass:
-    "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/postprocessing/UnrealBloomPass.js",
+    "https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js",
 };
 
-const scriptLoadCache = new Map();
+const moduleLoadCache = new Map();
 
-function loadScriptOnce(url) {
-  if (scriptLoadCache.has(url)) {
-    return scriptLoadCache.get(url);
+function importModuleOnce(url) {
+  if (moduleLoadCache.has(url)) {
+    return moduleLoadCache.get(url);
   }
 
-  const promise = new Promise((resolve, reject) => {
-    const existing = document.querySelector(`script[data-codex-src="${url}"]`);
-    if (existing && existing.dataset.loaded === "true") {
-      resolve();
-      return;
-    }
-
-    const script = existing || document.createElement("script");
-    if (!existing) {
-      script.src = url;
-      script.async = true;
-      script.dataset.codexSrc = url;
-      document.head.appendChild(script);
-    }
-
-    script.addEventListener(
-      "load",
-      () => {
-        script.dataset.loaded = "true";
-        resolve();
-      },
-      { once: true }
-    );
-
-    script.addEventListener(
-      "error",
-      () => reject(new Error(`[hero-dissolve] Failed to load script: ${url}`)),
-      { once: true }
-    );
+  const promise = import(/* @vite-ignore */ url).catch((error) => {
+    throw new Error(`[hero-dissolve] Failed to import module: ${url}\n${error}`);
   });
-
-  scriptLoadCache.set(url, promise);
+  moduleLoadCache.set(url, promise);
   return promise;
 }
 
 async function ensureThreeDependencies() {
-  if (!window.THREE) {
-    await loadScriptOnce(THREE_CDN.three);
-  }
+  const threeModule = window.THREE
+    ? { default: window.THREE }
+    : await importModuleOnce(THREE_CDN.three);
+  const gltfModule = await importModuleOnce(THREE_CDN.gltfLoader);
+  const effectComposerModule = await importModuleOnce(THREE_CDN.effectComposer);
+  const renderPassModule = await importModuleOnce(THREE_CDN.renderPass);
+  const unrealBloomModule = await importModuleOnce(THREE_CDN.unrealBloomPass);
 
-  await loadScriptOnce(THREE_CDN.gltfLoader);
-  await loadScriptOnce(THREE_CDN.effectComposer);
-  await loadScriptOnce(THREE_CDN.renderPass);
-  await loadScriptOnce(THREE_CDN.unrealBloomPass);
+  window.THREE = window.THREE || threeModule.default || threeModule;
+  window.GLTFLoader = window.GLTFLoader || gltfModule.GLTFLoader;
+  window.EffectComposer = window.EffectComposer || effectComposerModule.EffectComposer;
+  window.RenderPass = window.RenderPass || renderPassModule.RenderPass;
+  window.UnrealBloomPass = window.UnrealBloomPass || unrealBloomModule.UnrealBloomPass;
 
   // Normalize globals for easier access across different script styles.
   window.GLTFLoader = window.GLTFLoader || window.THREE?.GLTFLoader;
