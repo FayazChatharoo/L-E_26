@@ -2,23 +2,27 @@ import { clamp, createCueController } from "../utils.js";
 
 // Dissolve stage visual settings.
 const DISSOLVE_CONFIG = {
-  modelUrl: "https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb",
+  modelUrl: "/ASSETS/dissolve.glb",
   fallbackModelUrl: "/scripts/ASSETS/dissolve.glb",
   camera: {
     fov: 40,
     near: 0.1,
     far: 100,
   },
-  bloomStrength: 1.25,
-  bloomRadius: 0.45,
-  bloomThreshold: 0.1,
-  edge: 0.08,
-  frequency: 4.8,
+  framing: {
+    distanceMultiplier: 1.25,
+    yOffset: 0.08,
+  },
+  bloomStrength: 0.9,
+  bloomRadius: 0.32,
+  bloomThreshold: 0.22,
+  edge: 0.055,
+  frequency: 3.6,
   noiseOffset: 0.0,
   particleColor: "#ff9d29",
-  particleSize: 1.4,
-  particleSpeed: 1.6,
-  decayFrequency: 3.4,
+  particleSize: 1.15,
+  particleSpeed: 1.8,
+  decayFrequency: 3.2,
 };
 
 const THREE_CDN = {
@@ -157,24 +161,25 @@ function createDissolveMaterial(THREE) {
         // Inverted behavior: 0 hidden, 1 revealed.
         float reveal = smoothstep(pattern - uEdge, pattern + uEdge, uProgress);
 
-        // Strong edge around dissolve frontier.
+        // Strong and clean edge around dissolve frontier.
         float frontier = abs(pattern - uProgress);
-        float edgeBand = 1.0 - smoothstep(0.0, uEdge * 1.25, frontier);
+        float edgeBand = 1.0 - smoothstep(0.0, uEdge * 0.9, frontier);
+        float edgeGlow = smoothstep(0.0, uEdge * 1.8, uEdge * 1.8 - frontier);
 
-        // Particle motion that appears to detach and move outward.
+        // Particle motion that appears to detach and fly away from the surface.
         vec3 moveDir = normalize(vNormal + vec3(0.2, 0.55, 0.1));
-        vec3 particlePos = p + moveDir * (uTime * uParticleSpeed * 0.8);
+        vec3 particlePos = p + moveDir * (uTime * uParticleSpeed * 0.95);
         float particleNoise = noise3d(particlePos * 6.0 + vec3(3.1, 1.2, 5.4));
-        float particleMask = smoothstep(0.62, 0.95, particleNoise) * edgeBand;
+        float particleMask = smoothstep(0.70, 0.98, particleNoise) * edgeBand;
         float decay = exp(-frontier * (8.0 + uDecayFrequency * 4.0));
         float particles = particleMask * decay * uParticleSize;
 
         float lambert = dot(normalize(vNormal), normalize(vec3(0.2, 0.9, 0.5))) * 0.4 + 0.6;
-        vec3 baseColor = vec3(1.0) * lambert;
-        vec3 edgeColor = uParticleColor * edgeBand * 0.7;
-        vec3 particleColor = uParticleColor * particles * 1.8;
+        vec3 baseColor = mix(vec3(0.34, 0.37, 0.42), vec3(0.92, 0.94, 0.98), lambert);
+        vec3 edgeColor = uParticleColor * (edgeBand * 0.95 + edgeGlow * 0.65);
+        vec3 particleColor = uParticleColor * particles * 2.2;
 
-        float alpha = clamp(reveal + particles * 0.25, 0.0, 1.0);
+        float alpha = clamp(reveal + particles * 0.18, 0.0, 1.0);
         if (alpha < 0.01) {
           discard;
         }
@@ -201,11 +206,37 @@ function applyMaterialToModel(root, material) {
   });
 }
 
+function frameModelAndCamera(THREE, modelRoot, camera) {
+  const box = new THREE.Box3().setFromObject(modelRoot);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+
+  console.log("Model bounds size", size);
+  console.log("Model bounds center", center);
+
+  // Center model around origin first.
+  modelRoot.position.sub(center);
+  modelRoot.rotation.set(0, 0, 0);
+
+  // Fit camera distance to model extents.
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const fovRad = (camera.fov * Math.PI) / 180;
+  const fitDistance = maxDim / (2 * Math.tan(fovRad / 2));
+  const distance = fitDistance * DISSOLVE_CONFIG.framing.distanceMultiplier;
+
+  camera.position.set(0, size.y * DISSOLVE_CONFIG.framing.yOffset, distance);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+
+  console.log("Final camera position", camera.position);
+  console.log("Final model scale", modelRoot.scale);
+}
+
 function createFallbackMesh(THREE, scene) {
   const geometry = new THREE.IcosahedronGeometry(0.75, 4);
   const material = new THREE.MeshBasicMaterial({ color: 0x33d8ff, wireframe: true });
   const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(-1.6, 0, 0);
+  mesh.position.set(0, 0, 0);
   scene.add(mesh);
   return mesh;
 }
@@ -317,8 +348,6 @@ export function initHeroDissolve({
   let rafId = 0;
   let lastTime = 0;
   let elapsedTime = 0;
-  let debugMaterialTimeout = 0;
-  let usingDissolveMaterial = false;
 
   const debugState = {
     overrideProgress: false,
@@ -368,7 +397,7 @@ export function initHeroDissolve({
       lastTime = time;
       elapsedTime += delta;
 
-      if (dissolveMaterial && usingDissolveMaterial) {
+      if (dissolveMaterial) {
         dissolveMaterial.uniforms.uTime.value = elapsedTime;
       }
 
@@ -436,6 +465,10 @@ export function initHeroDissolve({
     const tryLoadAtIndex = (index) => {
       if (index >= candidates.length) {
         console.error("[hero-dissolve] All model URL attempts failed. Model not visible.");
+        if (!fallbackMesh) {
+          fallbackMesh = createFallbackMesh(THREE, scene);
+          fallbackMaterial = fallbackMesh.material;
+        }
         return;
       }
 
@@ -451,31 +484,11 @@ export function initHeroDissolve({
 
           modelRoot = gltf.scene;
           console.log("Model loaded", modelRoot);
-
-          const box = new THREE.Box3().setFromObject(modelRoot);
-          console.log("Model bounds", box);
-
-          // Force model into camera view (temporary debug baseline).
           modelRoot.position.set(0, 0, 0);
           modelRoot.scale.setScalar(1);
-          modelRoot.rotation.set(0, 0, 0);
-
-          // First pass: debug material to confirm visibility without shader.
-          const debugMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: false });
-          applyMaterialToModel(modelRoot, debugMat);
-
+          frameModelAndCamera(THREE, modelRoot, camera);
+          applyMaterialToModel(modelRoot, dissolveMaterial);
           scene.add(modelRoot);
-
-          // Second pass: re-apply dissolve after short delay.
-          window.clearTimeout(debugMaterialTimeout);
-          debugMaterialTimeout = window.setTimeout(() => {
-            if (!modelRoot || isDestroyed) {
-              return;
-            }
-            applyMaterialToModel(modelRoot, dissolveMaterial);
-            usingDissolveMaterial = true;
-            debugMat.dispose();
-          }, 1200);
         },
         undefined,
         (error) => {
@@ -539,10 +552,6 @@ export function initHeroDissolve({
     dissolveMaterial = createDissolveMaterial(THREE);
     applyDebugUniforms();
 
-    // Keep fallback visible for comparison.
-    fallbackMesh = createFallbackMesh(THREE, scene);
-    fallbackMaterial = fallbackMesh.material;
-
     setupPostProcessing(THREE);
     mountDebugPanel();
     loadModel(THREE);
@@ -602,11 +611,6 @@ export function initHeroDissolve({
     if (rafId) {
       window.cancelAnimationFrame(rafId);
       rafId = 0;
-    }
-
-    if (debugMaterialTimeout) {
-      window.clearTimeout(debugMaterialTimeout);
-      debugMaterialTimeout = 0;
     }
 
     if (fallbackMesh) {

@@ -164,7 +164,8 @@ export function initHeroOrchestrator(userConfig = {}) {
       tunnelScene.init();
     }
 
-    if (p < config.ranges.dissolve[0]) {
+    // Keep video fully bidirectional when returning from dissolve to video.
+    if (p <= config.ranges.video[1]) {
       videoScene.update(videoProgress);
     }
 
