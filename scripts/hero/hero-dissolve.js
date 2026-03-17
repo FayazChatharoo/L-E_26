@@ -2,17 +2,12 @@ import { clamp, createCueController } from "../utils.js";
 
 // Dissolve stage visual settings.
 const DISSOLVE_CONFIG = {
-  modelUrl: "https://lionelephant2026.netlify.app/scripts/ASSETS/dissolve.glb",
+  modelUrl: "/ASSETS/dissolve.glb",
   fallbackModelUrl: "/scripts/ASSETS/dissolve.glb",
   camera: {
     fov: 40,
     near: 0.1,
     far: 100,
-    position: [0, 0.1, 4.0],
-  },
-  model: {
-    rotationY: 0.0,
-    scale: 1.7,
   },
   bloomStrength: 1.25,
   bloomRadius: 0.45,
@@ -47,6 +42,7 @@ function importModuleOnce(url) {
   const promise = import(/* @vite-ignore */ url).catch((error) => {
     throw new Error(`[hero-dissolve] Failed to import module: ${url}\n${error}`);
   });
+
   moduleLoadCache.set(url, promise);
   return promise;
 }
@@ -65,12 +61,6 @@ async function ensureThreeDependencies() {
   window.EffectComposer = window.EffectComposer || effectComposerModule.EffectComposer;
   window.RenderPass = window.RenderPass || renderPassModule.RenderPass;
   window.UnrealBloomPass = window.UnrealBloomPass || unrealBloomModule.UnrealBloomPass;
-
-  // Normalize globals for easier access across different script styles.
-  window.GLTFLoader = window.GLTFLoader || window.THREE?.GLTFLoader;
-  window.EffectComposer = window.EffectComposer || window.THREE?.EffectComposer;
-  window.RenderPass = window.RenderPass || window.THREE?.RenderPass;
-  window.UnrealBloomPass = window.UnrealBloomPass || window.THREE?.UnrealBloomPass;
 
   const missing = [];
   if (!window.THREE) missing.push("THREE");
@@ -153,36 +143,43 @@ function createDissolveMaterial(THREE) {
       }
 
       void main() {
-        vec3 samplePos = vWorldPos * uFrequency + vec3(uNoiseOffset, uNoiseOffset * 0.5, 0.0);
-        float n1 = noise3d(samplePos);
-        float n2 = noise3d(samplePos * 2.1 + vec3(6.7, 2.9, 1.1)) * 0.5;
-        float n3 = noise3d(samplePos * 4.0 + vec3(1.3, 9.1, 5.7)) * 0.25;
+        vec3 p = vWorldPos * uFrequency + vec3(uNoiseOffset, uNoiseOffset * 0.5, 0.0);
 
-        // Fractal-style breakup with directional bias for clearer dissolve direction.
-        float pattern = (n1 + n2 + n3) / 1.75;
-        float directional = clamp((vWorldPos.y * 0.35) + 0.5, 0.0, 1.0);
-        pattern = mix(pattern, directional, 0.22);
+        float nA = noise3d(p);
+        float nB = noise3d(p * 2.0 + vec3(2.3, 7.9, 1.4)) * 0.5;
+        float nC = noise3d(p * 4.0 + vec3(8.4, 1.2, 5.8)) * 0.25;
+        float pattern = (nA + nB + nC) / 1.75;
 
-        // Inverted behavior:
-        // progress 0 => invisible
-        // progress 1 => fully visible
+        // Clear dissolve direction from bottom to top.
+        float directional = clamp(vWorldPos.y * 0.4 + 0.5, 0.0, 1.0);
+        pattern = mix(pattern, directional, 0.28);
+
+        // Inverted behavior: 0 hidden, 1 revealed.
         float reveal = smoothstep(pattern - uEdge, pattern + uEdge, uProgress);
 
-        // Strong, visible edge band.
-        float edgeBand = 1.0 - smoothstep(0.0, uEdge * 1.35, abs(pattern - uProgress));
-        float flicker = sin((uTime * uParticleSpeed + pattern * 8.0) * 6.283185 * uDecayFrequency) * 0.5 + 0.5;
-        float particleEdge = edgeBand * flicker * uParticleSize;
+        // Strong edge around dissolve frontier.
+        float frontier = abs(pattern - uProgress);
+        float edgeBand = 1.0 - smoothstep(0.0, uEdge * 1.25, frontier);
 
-        float light = dot(normalize(vNormal), normalize(vec3(0.2, 0.9, 0.5))) * 0.4 + 0.6;
-        vec3 baseColor = vec3(1.0) * light;
-        vec3 edgeColor = uParticleColor * particleEdge;
+        // Particle motion that appears to detach and move outward.
+        vec3 moveDir = normalize(vNormal + vec3(0.2, 0.55, 0.1));
+        vec3 particlePos = p + moveDir * (uTime * uParticleSpeed * 0.8);
+        float particleNoise = noise3d(particlePos * 6.0 + vec3(3.1, 1.2, 5.4));
+        float particleMask = smoothstep(0.62, 0.95, particleNoise) * edgeBand;
+        float decay = exp(-frontier * (8.0 + uDecayFrequency * 4.0));
+        float particles = particleMask * decay * uParticleSize;
 
-        float alpha = reveal;
+        float lambert = dot(normalize(vNormal), normalize(vec3(0.2, 0.9, 0.5))) * 0.4 + 0.6;
+        vec3 baseColor = vec3(1.0) * lambert;
+        vec3 edgeColor = uParticleColor * edgeBand * 0.7;
+        vec3 particleColor = uParticleColor * particles * 1.8;
+
+        float alpha = clamp(reveal + particles * 0.25, 0.0, 1.0);
         if (alpha < 0.01) {
           discard;
         }
 
-        gl_FragColor = vec4(baseColor + edgeColor, alpha);
+        gl_FragColor = vec4(baseColor + edgeColor + particleColor, alpha);
       }
     `,
   });
@@ -204,25 +201,11 @@ function applyMaterialToModel(root, material) {
   });
 }
 
-function fitModelToFrame(THREE, modelRoot) {
-  const box = new THREE.Box3().setFromObject(modelRoot);
-  if (box.isEmpty()) {
-    return;
-  }
-
-  const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const maxAxis = Math.max(size.x, size.y, size.z) || 1;
-  const scale = DISSOLVE_CONFIG.model.scale / maxAxis;
-
-  modelRoot.position.sub(center);
-  modelRoot.scale.setScalar(scale);
-  modelRoot.rotation.y = DISSOLVE_CONFIG.model.rotationY;
-}
-
-function createFallbackMesh(THREE, scene, material) {
-  const geometry = new THREE.IcosahedronGeometry(1.0, 5);
+function createFallbackMesh(THREE, scene) {
+  const geometry = new THREE.IcosahedronGeometry(0.75, 4);
+  const material = new THREE.MeshBasicMaterial({ color: 0x33d8ff, wireframe: true });
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(-1.6, 0, 0);
   scene.add(mesh);
   return mesh;
 }
@@ -243,7 +226,6 @@ function createDebugPanel(state, onChange) {
   panel.style.border = "1px solid rgba(255,255,255,0.2)";
   panel.style.borderRadius = "8px";
   panel.style.zIndex = "9999";
-  panel.style.pointerEvents = "auto";
   panel.setAttribute("data-hero-dissolve-debug", "true");
 
   const title = document.createElement("div");
@@ -281,7 +263,7 @@ function createDebugPanel(state, onChange) {
       input.checked = Boolean(state[control.key]);
       input.addEventListener("input", () => {
         state[control.key] = input.checked;
-        onChange(control.key, state[control.key]);
+        onChange();
       });
       row.appendChild(input);
     } else {
@@ -299,7 +281,7 @@ function createDebugPanel(state, onChange) {
       input.addEventListener("input", () => {
         state[control.key] = Number(input.value);
         value.textContent = Number(state[control.key]).toFixed(3);
-        onChange(control.key, state[control.key]);
+        onChange();
       });
 
       row.appendChild(input);
@@ -327,12 +309,16 @@ export function initHeroDissolve({
   let camera = null;
   let composer = null;
   let bloomPass = null;
-  let material = null;
+  let dissolveMaterial = null;
   let modelRoot = null;
   let fallbackMesh = null;
-  let rafId = 0;
-  let needsRender = false;
+  let fallbackMaterial = null;
   let debugPanel = null;
+  let rafId = 0;
+  let lastTime = 0;
+  let elapsedTime = 0;
+  let debugMaterialTimeout = 0;
+  let usingDissolveMaterial = false;
 
   const debugState = {
     overrideProgress: false,
@@ -353,15 +339,10 @@ export function initHeroDissolve({
     stageName: "dissolve",
   });
 
-  function requestRender() {
-    needsRender = true;
-  }
-
   function render() {
     if (!renderer || !scene || !camera) {
       return;
     }
-
     if (composer) {
       composer.render();
     } else {
@@ -374,14 +355,24 @@ export function initHeroDissolve({
       return;
     }
 
-    const tick = () => {
+    const tick = (time) => {
       if (isDestroyed) {
         return;
       }
-      if (needsRender) {
-        needsRender = false;
-        render();
+
+      if (!lastTime) {
+        lastTime = time;
       }
+
+      const delta = Math.max(0, (time - lastTime) / 1000);
+      lastTime = time;
+      elapsedTime += delta;
+
+      if (dissolveMaterial && usingDissolveMaterial) {
+        dissolveMaterial.uniforms.uTime.value = elapsedTime;
+      }
+
+      render();
       rafId = window.requestAnimationFrame(tick);
     };
 
@@ -407,15 +398,15 @@ export function initHeroDissolve({
   }
 
   function applyDebugUniforms() {
-    if (!material) {
+    if (!dissolveMaterial) {
       return;
     }
 
-    material.uniforms.uEdge.value = debugState.edge;
-    material.uniforms.uFrequency.value = debugState.frequency;
-    material.uniforms.uParticleSize.value = debugState.particleSize;
-    material.uniforms.uParticleSpeed.value = debugState.particleSpeed;
-    material.uniforms.uDecayFrequency.value = debugState.decayFrequency;
+    dissolveMaterial.uniforms.uEdge.value = debugState.edge;
+    dissolveMaterial.uniforms.uFrequency.value = debugState.frequency;
+    dissolveMaterial.uniforms.uParticleSize.value = debugState.particleSize;
+    dissolveMaterial.uniforms.uParticleSpeed.value = debugState.particleSpeed;
+    dissolveMaterial.uniforms.uDecayFrequency.value = debugState.decayFrequency;
 
     if (bloomPass) {
       bloomPass.strength = debugState.bloomStrength;
@@ -431,7 +422,6 @@ export function initHeroDissolve({
 
     debugPanel = createDebugPanel(debugState, () => {
       applyDebugUniforms();
-      requestRender();
     });
   }
 
@@ -445,9 +435,7 @@ export function initHeroDissolve({
 
     const tryLoadAtIndex = (index) => {
       if (index >= candidates.length) {
-        console.error("[hero-dissolve] All model URL attempts failed. Using fallback mesh.");
-        fallbackMesh = createFallbackMesh(THREE, scene, material);
-        requestRender();
+        console.error("[hero-dissolve] All model URL attempts failed. Model not visible.");
         return;
       }
 
@@ -457,16 +445,37 @@ export function initHeroDissolve({
       loader.load(
         modelUrl,
         (gltf) => {
-          if (isDestroyed || !scene) {
+          if (isDestroyed || !scene || !dissolveMaterial) {
             return;
           }
 
-          console.log(`[hero-dissolve] model loaded successfully from: ${modelUrl}`);
           modelRoot = gltf.scene;
-          fitModelToFrame(THREE, modelRoot);
-          applyMaterialToModel(modelRoot, material);
+          console.log("Model loaded", modelRoot);
+
+          const box = new THREE.Box3().setFromObject(modelRoot);
+          console.log("Model bounds", box);
+
+          // Force model into camera view (temporary debug baseline).
+          modelRoot.position.set(0, 0, 0);
+          modelRoot.scale.setScalar(1);
+          modelRoot.rotation.set(0, 0, 0);
+
+          // First pass: debug material to confirm visibility without shader.
+          const debugMat = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: false });
+          applyMaterialToModel(modelRoot, debugMat);
+
           scene.add(modelRoot);
-          requestRender();
+
+          // Second pass: re-apply dissolve after short delay.
+          window.clearTimeout(debugMaterialTimeout);
+          debugMaterialTimeout = window.setTimeout(() => {
+            if (!modelRoot || isDestroyed) {
+              return;
+            }
+            applyMaterialToModel(modelRoot, dissolveMaterial);
+            usingDissolveMaterial = true;
+            debugMat.dispose();
+          }, 1200);
         },
         undefined,
         (error) => {
@@ -506,11 +515,14 @@ export function initHeroDissolve({
       DISSOLVE_CONFIG.camera.near,
       DISSOLVE_CONFIG.camera.far
     );
-    camera.position.set(
-      DISSOLVE_CONFIG.camera.position[0],
-      DISSOLVE_CONFIG.camera.position[1],
-      DISSOLVE_CONFIG.camera.position[2]
-    );
+
+    // Temporary forced framing for visibility debugging.
+    camera.position.set(0, 0, 3);
+    camera.lookAt(0, 0, 0);
+
+    const light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(2, 2, 2);
+    scene.add(light);
 
     renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -524,15 +536,18 @@ export function initHeroDissolve({
       canvasContainer.appendChild(renderer.domElement);
     }
 
-    material = createDissolveMaterial(THREE);
+    dissolveMaterial = createDissolveMaterial(THREE);
     applyDebugUniforms();
+
+    // Keep fallback visible for comparison.
+    fallbackMesh = createFallbackMesh(THREE, scene);
+    fallbackMaterial = fallbackMesh.material;
 
     setupPostProcessing(THREE);
     mountDebugPanel();
     loadModel(THREE);
 
     initialized = true;
-    requestRender();
     startLoop();
   }
 
@@ -545,26 +560,13 @@ export function initHeroDissolve({
     console.log("dissolve progress", p);
     cues.update(p);
 
-    if (!initialized || !material) {
+    if (!initialized || !dissolveMaterial) {
       return;
     }
 
     debugState.progress = p;
     const effectiveProgress = debugState.overrideProgress ? debugState.progress : p;
-
-    material.uniforms.uProgress.value = effectiveProgress;
-    material.uniforms.uTime.value = effectiveProgress;
-
-    if (modelRoot) {
-      modelRoot.rotation.y = DISSOLVE_CONFIG.model.rotationY + effectiveProgress * 0.2;
-    }
-
-    if (fallbackMesh) {
-      fallbackMesh.rotation.y = effectiveProgress * Math.PI * 0.8;
-      fallbackMesh.rotation.x = effectiveProgress * 0.2;
-    }
-
-    requestRender();
+    dissolveMaterial.uniforms.uProgress.value = effectiveProgress;
   }
 
   function resize(width, height, dpr = window.devicePixelRatio || 1) {
@@ -587,8 +589,6 @@ export function initHeroDissolve({
         bloomPass.setSize(safeWidth, safeHeight);
       }
     }
-
-    requestRender();
   }
 
   function destroy() {
@@ -604,9 +604,18 @@ export function initHeroDissolve({
       rafId = 0;
     }
 
+    if (debugMaterialTimeout) {
+      window.clearTimeout(debugMaterialTimeout);
+      debugMaterialTimeout = 0;
+    }
+
     if (fallbackMesh) {
       fallbackMesh.geometry.dispose();
       fallbackMesh = null;
+    }
+    if (fallbackMaterial) {
+      fallbackMaterial.dispose();
+      fallbackMaterial = null;
     }
 
     if (modelRoot) {
@@ -619,9 +628,9 @@ export function initHeroDissolve({
       modelRoot = null;
     }
 
-    if (material) {
-      material.dispose();
-      material = null;
+    if (dissolveMaterial) {
+      dissolveMaterial.dispose();
+      dissolveMaterial = null;
     }
 
     if (renderer) {
