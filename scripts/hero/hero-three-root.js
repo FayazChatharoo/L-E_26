@@ -2,18 +2,52 @@ import { clamp } from "../utils.js";
 
 const DEBUG_HERO = true;
 
+function resolveRendererConfig() {
+  const heroThree = window.HeroThree || {};
+  const THREE = heroThree.THREE || window.THREE;
+  const backend = heroThree.backend || "webgl";
+
+  if (!THREE) {
+    return null;
+  }
+
+  if (backend === "webgpu") {
+    const RendererCtor =
+      heroThree.WebGPURenderer ||
+      heroThree.WEBGPU?.WebGPURenderer ||
+      heroThree.THREE?.WebGPURenderer ||
+      null;
+
+    return {
+      backend,
+      THREE,
+      RendererCtor,
+      asyncInit: true,
+    };
+  }
+
+  return {
+    backend: "webgl",
+    THREE,
+    RendererCtor: heroThree.WebGLRenderer || THREE.WebGLRenderer,
+    asyncInit: false,
+  };
+}
+
 export function initHeroThreeRoot({ mountEl } = {}) {
-  const THREE = window.THREE;
+  const config = resolveRendererConfig();
+
   if (DEBUG_HERO) {
     console.groupCollapsed("[Hero] ThreeRoot Init");
-    console.log("[Hero][ThreeRoot] THREE available:", Boolean(THREE));
+    console.log("[Hero][ThreeRoot] backend:", config?.backend || "missing");
+    console.log("[Hero][ThreeRoot] THREE available:", Boolean(config?.THREE));
     console.log("[Hero][ThreeRoot] mount element:", mountEl || null);
     console.groupEnd();
   }
 
-  if (!THREE) {
+  if (!config?.THREE || !mountEl || !config.RendererCtor) {
     if (DEBUG_HERO) {
-      console.error("[Hero][ThreeRoot] THREE is undefined — aborting init");
+      console.error("[Hero][ThreeRoot] renderer setup unavailable — aborting init");
     }
     return {
       isReady: false,
@@ -24,17 +58,10 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     };
   }
 
-  if (!THREE || !mountEl) {
-    return {
-      isReady: false,
-      setActiveScene() {},
-      resize() {},
-      render() {},
-      destroy() {},
-    };
-  }
+  const THREE = config.THREE;
 
   let isDestroyed = false;
+  let isReady = false;
   let activeScene = null;
   let rafId = 0;
 
@@ -43,24 +70,29 @@ export function initHeroThreeRoot({ mountEl } = {}) {
   camera.position.set(0, 0, 4);
   camera.lookAt(0, 0, 0);
 
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  const renderer = new config.RendererCtor({ alpha: true, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(Math.max(1, mountEl.clientWidth || 1), Math.max(1, mountEl.clientHeight || 1));
+  renderer.setSize(
+    Math.max(1, mountEl.clientWidth || 1),
+    Math.max(1, mountEl.clientHeight || 1)
+  );
 
-  if (!mountEl.contains(renderer.domElement)) {
-    mountEl.appendChild(renderer.domElement);
-    if (DEBUG_HERO) {
-      console.log("[Hero][ThreeRoot] canvas injected:", renderer.domElement);
+  function attachCanvas() {
+    if (renderer.domElement && !mountEl.contains(renderer.domElement)) {
+      mountEl.appendChild(renderer.domElement);
+      if (DEBUG_HERO) {
+        console.log("[Hero][ThreeRoot] canvas injected:", renderer.domElement);
+      }
     }
+
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.pointerEvents = "none";
   }
 
-  renderer.domElement.style.width = "100%";
-  renderer.domElement.style.height = "100%";
-  renderer.domElement.style.display = "block";
-  renderer.domElement.style.pointerEvents = "none";
-
   function render() {
-    if (isDestroyed) {
+    if (isDestroyed || !isReady) {
       return;
     }
     renderer.render(scene, camera);
@@ -80,11 +112,33 @@ export function initHeroThreeRoot({ mountEl } = {}) {
   }
 
   function ensureLoop() {
-    if (rafId) {
+    if (rafId || isDestroyed || !isReady) {
       return;
     }
     rafId = window.requestAnimationFrame(tick);
   }
+
+  async function initializeRenderer() {
+    try {
+      if (typeof renderer.init === "function") {
+        await renderer.init();
+      }
+
+      if (isDestroyed) {
+        return;
+      }
+
+      attachCanvas();
+      isReady = true;
+      ensureLoop();
+    } catch (error) {
+      if (DEBUG_HERO) {
+        console.error("[Hero][ThreeRoot] renderer init failed", error);
+      }
+    }
+  }
+
+  void initializeRenderer();
 
   function setActiveScene(nextScene) {
     if (activeScene === nextScene) {
@@ -112,10 +166,11 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     render();
   }
 
-  ensureLoop();
-
   return {
-    isReady: true,
+    get isReady() {
+      return isReady;
+    },
+    backend: config.backend,
     THREE,
     scene,
     camera,
@@ -134,7 +189,12 @@ export function initHeroThreeRoot({ mountEl } = {}) {
         rafId = 0;
       }
 
-      renderer.dispose();
+      if (typeof renderer.setAnimationLoop === "function") {
+        renderer.setAnimationLoop(null);
+      }
+      if (typeof renderer.dispose === "function") {
+        renderer.dispose();
+      }
       if (renderer.domElement && renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }

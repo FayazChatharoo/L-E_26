@@ -56,7 +56,7 @@ export function initHeroDissolve({
   cueScopeEl,
   cueSelector = "[data-hero-cue]",
 } = {}) {
-  if (!threeRoot?.isReady) {
+  if (!threeRoot?.THREE || !threeRoot?.scene) {
     return {
       initialized: false,
       init() {},
