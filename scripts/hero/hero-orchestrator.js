@@ -15,7 +15,7 @@ const DEFAULT_CONFIG = {
   canvasRootSelector: "[data-hero-canvas-root]",
   dissolveCanvasSelector: '[data-hero-canvas="dissolve"]',
   tunnelCanvasSelector: '[data-hero-canvas="tunnel"]',
-  scrollDistance: 9000,
+  scrollDistance: 5000,
   ranges: {
     video: [0.0, 0.6],
     dissolve: [0.6, 0.8],
