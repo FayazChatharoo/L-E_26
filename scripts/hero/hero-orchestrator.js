@@ -1,6 +1,7 @@
 import { initHeroVideo } from "./hero-video.js";
 import { initHeroDissolve } from "./hero-dissolve.js";
 import { initHeroTunnel } from "./hero-tunnel.js";
+import { initHeroThreeRoot } from "./hero-three-root.js";
 import { clamp, mapRange, normalizeRange, rafThrottle } from "../utils.js";
 
 const DEFAULT_CONFIG = {
@@ -20,6 +21,8 @@ const DEFAULT_CONFIG = {
     fadeInStart: 0.56,
     fadePeak: 0.6,
     fadeOutEnd: 0.62,
+    canvasInStart: 0.57,
+    canvasInEnd: 0.64,
     dissolveWarmStart: 0.54,
     tunnelWarmStart: 0.76,
   },
@@ -136,26 +139,102 @@ export function initHeroOrchestrator(userConfig = {}) {
   const videoEl = rootEl.querySelector(config.videoSelector);
   const overlayEl = rootEl.querySelector(config.overlaySelector);
   const dissolveCanvasEl = rootEl.querySelector(config.dissolveCanvasSelector);
-  const tunnelCanvasEl = rootEl.querySelector(config.tunnelCanvasSelector);
+
+  const threeRoot = initHeroThreeRoot({
+    mountEl: dissolveCanvasEl,
+  });
 
   const videoScene = initHeroVideo({
     stageEl: videoStageEl,
     videoEl,
   });
   const dissolveScene = initHeroDissolve({
-    canvasContainer: dissolveCanvasEl,
+    threeRoot,
     cueScopeEl: dissolveStageEl,
   });
   const tunnelScene = initHeroTunnel({
-    canvasContainer: tunnelCanvasEl,
+    threeRoot,
     cueScopeEl: tunnelStageEl,
   });
+
+  const stageState = {
+    currentStage: "video",
+    localProgress: {
+      video: 0,
+      dissolve: 0,
+      tunnel: 0,
+    },
+  };
+
+  function getCurrentStage(progress) {
+    if (progress < config.ranges.video[1]) {
+      return "video";
+    }
+    if (progress < config.ranges.dissolve[1]) {
+      return "dissolve";
+    }
+    return "tunnel";
+  }
+
+  function updateCanvasVisibility(progress) {
+    if (!videoEl || !dissolveCanvasEl) {
+      return;
+    }
+
+    const canvasOpacity = clamp(
+      mapRange(
+        progress,
+        config.transitions.canvasInStart,
+        config.transitions.canvasInEnd,
+        0,
+        1
+      ),
+      0,
+      1
+    );
+    const videoOpacity = 1 - canvasOpacity;
+
+    videoEl.style.opacity = String(videoOpacity);
+    videoEl.style.zIndex = "1";
+    dissolveCanvasEl.style.opacity = String(canvasOpacity);
+    dissolveCanvasEl.style.zIndex = "2";
+    dissolveCanvasEl.style.pointerEvents = "none";
+  }
+
+  function switchStage(nextStage) {
+    if (nextStage === stageState.currentStage) {
+      return;
+    }
+
+    stageState.currentStage = nextStage;
+
+    if (nextStage === "video") {
+      dissolveScene.hide?.();
+      tunnelScene.hide?.();
+      threeRoot.setActiveScene(null);
+      return;
+    }
+
+    if (nextStage === "dissolve") {
+      dissolveScene.init?.();
+      dissolveScene.show?.();
+      tunnelScene.hide?.();
+      threeRoot.setActiveScene(dissolveScene);
+      return;
+    }
+
+    tunnelScene.init?.();
+    tunnelScene.show?.();
+    dissolveScene.hide?.();
+    threeRoot.setActiveScene(tunnelScene);
+  }
 
   function renderAtProgress(progress) {
     const p = clamp(progress, 0, 1);
     const videoProgress = getStageProgress(p, config.ranges.video);
     const dissolveProgress = getStageProgress(p, config.ranges.dissolve);
     const tunnelProgress = getStageProgress(p, config.ranges.tunnel);
+    const nextStage = getCurrentStage(p);
 
     if (p >= config.transitions.dissolveWarmStart && !dissolveScene.initialized) {
       dissolveScene.init();
@@ -164,18 +243,25 @@ export function initHeroOrchestrator(userConfig = {}) {
       tunnelScene.init();
     }
 
+    switchStage(nextStage);
+
     // Keep video fully bidirectional when returning from dissolve to video.
     if (p <= config.ranges.video[1]) {
       videoScene.update(videoProgress);
     }
 
-    if (p >= config.ranges.dissolve[0] && p <= config.ranges.dissolve[1]) {
+    if (nextStage === "dissolve") {
       dissolveScene.update(dissolveProgress);
     }
 
-    if (p >= config.ranges.tunnel[0]) {
+    if (nextStage === "tunnel") {
       tunnelScene.update(tunnelProgress);
     }
+
+    stageState.localProgress.video = videoProgress;
+    stageState.localProgress.dissolve = dissolveProgress;
+    stageState.localProgress.tunnel = tunnelProgress;
+    updateCanvasVisibility(p);
 
     if (overlayEl) {
       const opacity = getOverlayOpacity(p, config.transitions);
@@ -192,8 +278,7 @@ export function initHeroOrchestrator(userConfig = {}) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     videoScene.resize(width, height, dpr);
-    dissolveScene.resize(width, height, dpr);
-    tunnelScene.resize(width, height, dpr);
+    threeRoot.resize(width, height, dpr);
   }
 
   const onResize = rafThrottle(() => {
@@ -224,10 +309,20 @@ export function initHeroOrchestrator(userConfig = {}) {
       videoScene.destroy();
       dissolveScene.destroy();
       tunnelScene.destroy();
+      threeRoot.destroy();
 
       if (overlayEl) {
         overlayEl.style.opacity = "";
         overlayEl.style.pointerEvents = "";
+      }
+      if (videoEl) {
+        videoEl.style.opacity = "";
+        videoEl.style.zIndex = "";
+      }
+      if (dissolveCanvasEl) {
+        dissolveCanvasEl.style.opacity = "";
+        dissolveCanvasEl.style.zIndex = "";
+        dissolveCanvasEl.style.pointerEvents = "";
       }
 
       stageEls.forEach((stageEl) => {
@@ -241,6 +336,12 @@ export function initHeroOrchestrator(userConfig = {}) {
     },
     refresh() {
       trigger.refresh();
+    },
+    getState() {
+      return {
+        currentStage: stageState.currentStage,
+        localProgress: { ...stageState.localProgress },
+      };
     },
   };
 
