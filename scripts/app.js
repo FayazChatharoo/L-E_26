@@ -1,7 +1,6 @@
 console.log("app loaded");
 import { initHeroOrchestrator } from "./hero/hero-orchestrator.js";
 import { ensureHeroThreeDeps } from "./hero/hero-three-deps.js";
-import { initWebGPUSmokePOC } from "./poc/webgpu-smoke.js";
 
 let heroController = null;
 const DEBUG_HERO = true;
@@ -64,13 +63,15 @@ async function bootHero() {
 }
 
 async function boot() {
-  const isPOCPage = Boolean(document.querySelector("[data-webgpu-poc-canvas]"));
-  if (isPOCPage) {
+  const page = document.body?.dataset?.page;
+
+  // Optional manual smoke page only. Do not hijack the hero flow.
+  if (page === "webgpu-poc") {
+    const { initWebGPUSmokePOC } = await import("./poc/webgpu-smoke.js");
     await initWebGPUSmokePOC();
     return;
   }
 
-  const page = document.body?.dataset?.page;
   if (page === "home") {
     await bootHero();
   }
