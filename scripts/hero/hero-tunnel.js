@@ -37,12 +37,78 @@ const DEFAULT_PARAMS = {
 };
 
 const DEFAULT_SIGNAL_GROUPS = [
-  { colorKey: "color1", name: "Color 1", enabled: true, count: 94, speed: 0.345, trailLength: 3 },
-  { colorKey: "color2", name: "Color 2", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
-  { colorKey: "color3", name: "Color 3", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
-  { colorKey: "color4", name: "Color 4", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
-  { colorKey: "color5", name: "Color 5", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
-  { colorKey: "color6", name: "Color 6", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
+  {
+    colorKey: "color1",
+    name: "Color 1",
+    enabled: true,
+    count: 94,
+    speed: 0.345,
+    trailLength: 3,
+    speedInfluence: 0.15,
+    countInfluence: 18,
+    trailInfluence: 1.2,
+    presenceMode: "stable",
+  },
+  {
+    colorKey: "color2",
+    name: "Color 2",
+    enabled: true,
+    count: 56,
+    speed: 0.35,
+    trailLength: 3,
+    speedInfluence: 0.85,
+    countInfluence: 42,
+    trailInfluence: 3.0,
+    presenceMode: "reactive",
+  },
+  {
+    colorKey: "color3",
+    name: "Color 3",
+    enabled: true,
+    count: 44,
+    speed: 0.33,
+    trailLength: 3,
+    speedInfluence: 0.5,
+    countInfluence: 30,
+    trailInfluence: 2.2,
+    presenceMode: "mid",
+  },
+  {
+    colorKey: "color4",
+    name: "Color 4",
+    enabled: true,
+    count: 40,
+    speed: 0.31,
+    trailLength: 3,
+    speedInfluence: 0.7,
+    countInfluence: 34,
+    trailInfluence: 2.4,
+    presenceMode: "high",
+  },
+  {
+    colorKey: "color5",
+    name: "Color 5",
+    enabled: true,
+    count: 52,
+    speed: 0.46,
+    trailLength: 3,
+    speedInfluence: 1.2,
+    countInfluence: 44,
+    trailInfluence: 3.6,
+    presenceMode: "chaotic",
+  },
+  {
+    colorKey: "color6",
+    name: "Color 6",
+    enabled: true,
+    count: 30,
+    speed: 0.28,
+    trailLength: 3,
+    speedInfluence: 0.4,
+    countInfluence: 16,
+    trailInfluence: 1.8,
+    presenceMode: "accent",
+  },
 ];
 
 function isDebugEnabled() {
@@ -150,7 +216,30 @@ export function initHeroTunnel({
   let isVisible = false;
   let localProgress = 0;
   let scrollTime = 0;
-  let previousProgress = 0;
+  let baseMotionSpeed = 1.1;
+  let lastFrameTime = performance.now() * 0.001;
+
+  function getPresenceFactor(mode, p) {
+    if (mode === "stable") {
+      return 0.8 + p * 0.2;
+    }
+    if (mode === "reactive") {
+      return 0.35 + p * 0.65;
+    }
+    if (mode === "mid") {
+      return Math.max(0, 1 - Math.abs(p - 0.55) / 0.35);
+    }
+    if (mode === "high") {
+      return THREE.MathUtils.smoothstep(p, 0.65, 0.95);
+    }
+    if (mode === "chaotic") {
+      return 0.45 + p * 0.55;
+    }
+    if (mode === "accent") {
+      return 0.18 + p * 0.35;
+    }
+    return 1;
+  }
 
   function createSignalMesh() {
     const geometry = new THREE.BufferGeometry();
@@ -210,6 +299,12 @@ export function initHeroTunnel({
     signalGroups = DEFAULT_SIGNAL_GROUPS.map((entry) => ({
       ...entry,
       color: params[entry.colorKey],
+      baseCount: entry.count,
+      baseTrail: entry.trailLength,
+      runtimeSpeed: entry.speed,
+      runtimeCount: entry.count,
+      runtimeTrail: entry.trailLength,
+      runtimePresence: 1,
       signals: [],
     }));
   }
@@ -240,10 +335,12 @@ export function initHeroTunnel({
   function applyProgressToParams(progress) {
     const p = clamp(progress, 0, 1);
     // Scroll-driven modulation while keeping all GUI controls available.
-    const speedScale = 0.35 + p * 1.5;
     const glowScale = 0.6 + p * 0.9;
     const convergeScale = 1 - p * 0.65;
     const spreadScale = 0.65 + p * 0.6;
+    const waveSpeedScale = 0.55 + p * 1.35;
+
+    baseMotionSpeed = THREE.MathUtils.lerp(0.85, 2.2, p);
 
     if (bloomPass) {
       bloomPass.strength = params.bloomStrength * glowScale;
@@ -251,8 +348,22 @@ export function initHeroTunnel({
       bloomPass.threshold = params.bloomThreshold;
     }
 
+    params.runtimeWaveSpeed = params.waveSpeed * waveSpeedScale;
     signalGroups.forEach((groupState) => {
-      groupState.runtimeSpeed = groupState.speed * speedScale;
+      const presence = getPresenceFactor(groupState.presenceMode, p);
+      const baseSpeed = 0.7;
+
+      groupState.runtimePresence = presence;
+      groupState.runtimeSpeed =
+        groupState.speed * (baseSpeed + p * groupState.speedInfluence) * (0.65 + presence * 0.6);
+      groupState.runtimeCount = Math.max(
+        0,
+        Math.floor((groupState.baseCount + p * groupState.countInfluence) * presence)
+      );
+      groupState.runtimeTrail = Math.max(
+        1,
+        Math.floor(groupState.baseTrail + p * groupState.trailInfluence)
+      );
     });
 
     params.runtimeConvergeWidth = Math.max(0.05, params.convergeWidth * convergeScale);
@@ -284,10 +395,19 @@ export function initHeroTunnel({
         return;
       }
 
-      const trailLength = Math.max(0, Math.floor(groupState.trailLength));
+      const trailLength = Math.max(0, Math.floor(groupState.runtimeTrail || groupState.trailLength));
       const drawCount = Math.max(1, trailLength);
+      const activeCount = Math.min(
+        groupState.signals.length,
+        Math.max(0, Math.floor(groupState.runtimeCount ?? groupState.signals.length))
+      );
 
-      groupState.signals.forEach((signal) => {
+      groupState.signals.forEach((signal, index) => {
+        if (index >= activeCount) {
+          signal.mesh.geometry.setDrawRange(0, 0);
+          return;
+        }
+
         signal.progress += signal.speed * 0.005 * (groupState.runtimeSpeed || groupState.speed);
 
         if (signal.progress > 1.0) {
@@ -299,6 +419,7 @@ export function initHeroTunnel({
 
         const pos = getPathPoint(THREE, signal.progress, signal.laneIndex, scrollTime, {
           ...params,
+          waveSpeed: params.runtimeWaveSpeed ?? params.waveSpeed,
           convergeWidth: params.runtimeConvergeWidth ?? params.convergeWidth,
           spreadHeight: params.runtimeSpreadHeight ?? params.spreadHeight,
         });
@@ -429,9 +550,14 @@ export function initHeroTunnel({
     signalGroups.forEach((groupState) => {
       const folder = folderSignals.addFolder(groupState.name);
       folder.add(groupState, "enabled").name("Enabled").onChange(() => rebuildSignalGroup(groupState));
-      folder.add(groupState, "count", 0, 200, 1).name("Count").onFinishChange(() => rebuildSignalGroup(groupState));
+      folder.add(groupState, "count", 0, 200, 1).name("Count").onFinishChange((v) => {
+        groupState.baseCount = Math.max(0, Math.floor(v));
+        rebuildSignalGroup(groupState);
+      });
       folder.add(groupState, "speed", 0, 3, 0.001).name("Speed");
-      folder.add(groupState, "trailLength", 0, 100, 1).name("Trail Length");
+      folder.add(groupState, "trailLength", 0, 100, 1).name("Trail Length").onChange((v) => {
+        groupState.baseTrail = Math.max(0, Math.floor(v));
+      });
     });
   }
 
@@ -468,14 +594,7 @@ export function initHeroTunnel({
     const p = clamp(progress, 0, 1);
     localProgress = p;
     cues.update(p);
-
-    const deltaProgress = p - previousProgress;
-    previousProgress = p;
-
-    const baseTimeScale = THREE.MathUtils.lerp(0.5, 2.4, p);
-    scrollTime += deltaProgress * 120 * baseTimeScale;
     applyProgressToParams(p);
-    updateLinesAndSignals();
   }
 
   function show() {
@@ -484,6 +603,7 @@ export function initHeroTunnel({
     }
     group.visible = true;
     isVisible = true;
+    lastFrameTime = performance.now() * 0.001;
     threeRoot.scene.background = new THREE.Color(params.colorBg);
     threeRoot.scene.fog = new THREE.FogExp2(params.colorBg, tunnelFogDensity);
   }
@@ -548,7 +668,19 @@ export function initHeroTunnel({
     show,
     hide,
     resize,
-    tick() {},
+    tick() {
+      if (!initialized || !isVisible) {
+        return;
+      }
+
+      const now = performance.now() * 0.001;
+      const deltaTime = Math.min(0.05, Math.max(0.001, now - lastFrameTime));
+      lastFrameTime = now;
+
+      // Base motion is always alive and independent from scroll.
+      scrollTime += deltaTime * baseMotionSpeed;
+      updateLinesAndSignals();
+    },
     render,
     destroy,
     get initialized() {
