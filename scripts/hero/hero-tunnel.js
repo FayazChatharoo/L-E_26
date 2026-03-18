@@ -2,9 +2,18 @@ import { clamp, createCueController } from "../utils.js";
 
 const DEBUG_HERO = true;
 
-const TUNNEL_CONFIG = {
+const CONSTANTS = {
+  segmentCount: 150,
+  maxTrail: 150,
+};
+
+const DEFAULT_PARAMS = {
+  colorBg: "#080808",
   colorLine: "#373f48",
   lineCount: 80,
+  globalRotation: 0,
+  positionX: 0,
+  positionY: 0,
   spreadHeight: 30.33,
   spreadDepth: 0,
   curveLength: 50,
@@ -13,25 +22,37 @@ const TUNNEL_CONFIG = {
   convergeWidth: 1.6,
   waveSpeed: 2.48,
   waveHeight: 0.145,
-  lineOpacity: 0.55,
-  segmentCount: 150,
-  maxTrail: 64,
-  bloomStrength: 2.2,
+  lineOpacity: 0.557,
+  bloomStrength: 3.0,
   bloomRadius: 0.5,
-  bloomThreshold: 0.15,
-  signalDensity: 1,
-  maxSignalMeshes: 48,
-  debug: true,
+  bloomThreshold: 0.0,
+  slowmoScale: 0.1,
+  slowmoDuration: 0.55,
+  color1: "#8fc9ff",
+  color2: "#ff0055",
+  color3: "#ffcc00",
+  color4: "#00ffd5",
+  color5: "#a855ff",
+  color6: "#00ff66",
 };
 
-const SIGNAL_GROUP_CONFIG = [
-  { name: "Blue", color: "#8fc9ff", enabled: true, count: 24, speed: 0.345, trailLength: 3 },
-  { name: "Pink", color: "#ff0055", enabled: false, count: 14, speed: 0.29, trailLength: 3 },
-  { name: "Amber", color: "#ffcc00", enabled: false, count: 12, speed: 0.32, trailLength: 3 },
-  { name: "Cyan", color: "#00ffd5", enabled: false, count: 12, speed: 0.31, trailLength: 3 },
-  { name: "Violet", color: "#a855ff", enabled: false, count: 10, speed: 0.34, trailLength: 3 },
-  { name: "Green", color: "#00ff66", enabled: false, count: 10, speed: 0.3, trailLength: 3 },
+const DEFAULT_SIGNAL_GROUPS = [
+  { colorKey: "color1", name: "Color 1", enabled: true, count: 94, speed: 0.345, trailLength: 3 },
+  { colorKey: "color2", name: "Color 2", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
+  { colorKey: "color3", name: "Color 3", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
+  { colorKey: "color4", name: "Color 4", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
+  { colorKey: "color5", name: "Color 5", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
+  { colorKey: "color6", name: "Color 6", enabled: false, count: 0, speed: 0.345, trailLength: 3 },
 ];
+
+function isDebugEnabled() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("debug") === "true";
+  } catch (error) {
+    return false;
+  }
+}
 
 function getPathPoint(THREE, t, lineIndex, time, params) {
   const totalLen = params.curveLength + params.straightLength;
@@ -39,10 +60,10 @@ function getPathPoint(THREE, t, lineIndex, time, params) {
 
   let y = 0;
   let z = 0;
-  const spreadFactor = (lineIndex / Math.max(1, params.lineCount - 1) - 0.5) * 2;
+  const spreadFactor = (lineIndex / params.lineCount - 0.5) * 2;
 
   if (currentX < 0) {
-    const ratio = (currentX + params.curveLength) / Math.max(0.0001, params.curveLength);
+    const ratio = (currentX + params.curveLength) / Math.max(params.curveLength, 0.0001);
     let shapeFactor = (Math.cos(ratio * Math.PI) + 1) / 2;
     shapeFactor = Math.pow(shapeFactor, params.curvePower);
 
@@ -52,94 +73,12 @@ function getPathPoint(THREE, t, lineIndex, time, params) {
     const spreadZ = params.convergeWidth + (params.spreadDepth - params.convergeWidth) * shapeFactor;
     z = spreadFactor * spreadZ;
 
-    const wave = Math.sin(time * params.waveSpeed + currentX * 0.1 + lineIndex) * params.waveHeight * shapeFactor;
+    const waveFactor = shapeFactor;
+    const wave = Math.sin(time * params.waveSpeed + currentX * 0.1 + lineIndex) * params.waveHeight * waveFactor;
     y += wave;
   }
 
   return new THREE.Vector3(currentX, y, z);
-}
-
-function createTunnelDebugUI(params, handlers) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = "Tunnel Debug";
-  button.style.position = "fixed";
-  button.style.right = "16px";
-  button.style.bottom = "16px";
-  button.style.zIndex = "9999";
-  button.style.padding = "8px 10px";
-  button.style.fontSize = "12px";
-  button.style.border = "1px solid rgba(255,255,255,0.25)";
-  button.style.background = "rgba(0,0,0,0.65)";
-  button.style.color = "#fff";
-  button.style.cursor = "pointer";
-
-  const panel = document.createElement("div");
-  panel.style.position = "fixed";
-  panel.style.right = "16px";
-  panel.style.bottom = "52px";
-  panel.style.width = "280px";
-  panel.style.maxHeight = "60vh";
-  panel.style.overflow = "auto";
-  panel.style.zIndex = "9999";
-  panel.style.padding = "10px";
-  panel.style.border = "1px solid rgba(255,255,255,0.2)";
-  panel.style.background = "rgba(0,0,0,0.78)";
-  panel.style.color = "#fff";
-  panel.style.fontSize = "12px";
-  panel.style.display = "none";
-
-  function addRow(label, min, max, step, value, onChange) {
-    const wrap = document.createElement("label");
-    wrap.style.display = "block";
-    wrap.style.marginBottom = "8px";
-
-    const title = document.createElement("div");
-    title.textContent = `${label}: ${value}`;
-    title.style.marginBottom = "4px";
-
-    const input = document.createElement("input");
-    input.type = "range";
-    input.min = String(min);
-    input.max = String(max);
-    input.step = String(step);
-    input.value = String(value);
-    input.style.width = "100%";
-
-    input.addEventListener("input", () => {
-      const nextValue = Number(input.value);
-      title.textContent = `${label}: ${nextValue.toFixed(3)}`;
-      onChange(nextValue);
-    });
-
-    wrap.appendChild(title);
-    wrap.appendChild(input);
-    panel.appendChild(wrap);
-  }
-
-  addRow("lineCount", 20, 220, 1, params.lineCount, handlers.onLineCount);
-  addRow("spreadHeight", 2, 80, 0.1, params.spreadHeight, handlers.onSpreadHeight);
-  addRow("waveSpeed", 0, 6, 0.01, params.waveSpeed, handlers.onWaveSpeed);
-  addRow("waveHeight", 0, 2.5, 0.005, params.waveHeight, handlers.onWaveHeight);
-  addRow("signalDensity", 0, 2, 0.01, params.signalDensity, handlers.onSignalDensity);
-  addRow("trailLength", 1, 90, 1, 3, handlers.onTrailLength);
-  addRow("bloomStrength", 0, 5, 0.01, params.bloomStrength, handlers.onBloomStrength);
-  addRow("bloomRadius", 0, 1, 0.01, params.bloomRadius, handlers.onBloomRadius);
-  addRow("bloomThreshold", 0, 1, 0.01, params.bloomThreshold, handlers.onBloomThreshold);
-
-  button.addEventListener("click", () => {
-    panel.style.display = panel.style.display === "none" ? "block" : "none";
-  });
-
-  document.body.appendChild(button);
-  document.body.appendChild(panel);
-
-  return {
-    destroy() {
-      if (button.parentNode) button.parentNode.removeChild(button);
-      if (panel.parentNode) panel.parentNode.removeChild(panel);
-    },
-  };
 }
 
 export function initHeroTunnel({
@@ -147,31 +86,50 @@ export function initHeroTunnel({
   cueScopeEl,
   cueSelector = "[data-hero-cue]",
 } = {}) {
-  if (!threeRoot?.THREE || !threeRoot?.scene) {
+  if (!threeRoot?.THREE || !threeRoot?.scene || !threeRoot?.renderer) {
     return {
       initialized: false,
       init() {},
       update() {},
-      tick() {},
       show() {},
       hide() {},
       resize() {},
+      tick() {},
+      render() {
+        return false;
+      },
       destroy() {},
     };
   }
 
   const THREE = threeRoot.THREE;
+  const params = { ...DEFAULT_PARAMS };
+  params.positionX = (params.curveLength - params.straightLength) / 2;
+
+  const heroThree = window.HeroThree || {};
+  const EffectComposer = heroThree.EffectComposer || window.EffectComposer || null;
+  const RenderPass = heroThree.RenderPass || window.RenderPass || null;
+  const UnrealBloomPass = heroThree.UnrealBloomPass || window.UnrealBloomPass || null;
+  const GUI = heroThree.GUI || null;
+
+  const cues = createCueController({
+    scopeEl: cueScopeEl,
+    selector: cueSelector,
+    stageName: "tunnel",
+  });
+
   const group = new THREE.Group();
   group.visible = false;
+  const tunnelFogDensity = 0.002;
 
   const contentGroup = new THREE.Group();
-  contentGroup.position.set((TUNNEL_CONFIG.curveLength - TUNNEL_CONFIG.straightLength) / 2, 0, 0);
+  contentGroup.position.set(params.positionX, params.positionY, 0);
   group.add(contentGroup);
 
   const bgMaterial = new THREE.LineBasicMaterial({
-    color: new THREE.Color(TUNNEL_CONFIG.colorLine),
+    color: params.colorLine,
     transparent: true,
-    opacity: TUNNEL_CONFIG.lineOpacity,
+    opacity: params.lineOpacity,
     depthWrite: false,
   });
 
@@ -183,55 +141,31 @@ export function initHeroTunnel({
     transparent: true,
   });
 
-  const cues = createCueController({
-    scopeEl: cueScopeEl,
-    selector: cueSelector,
-    stageName: "tunnel",
-  });
-
-  let initialized = false;
-  let visibleAmount = 0;
-  let localProgress = 0;
-  let lastTickTime = performance.now() * 0.001;
-  let debugUI = null;
-  let lines = [];
+  let backgroundLines = [];
   let signalGroups = [];
-  let runtimeTrailLength = 3;
-  let activeSignalRatio = 1;
-  let signalAllocationsDisabled = false;
+  let composer = null;
+  let bloomPass = null;
+  let gui = null;
+  let initialized = false;
+  let isVisible = false;
+  let localProgress = 0;
+  let scrollTime = 0;
+  let previousProgress = 0;
 
   function createSignalMesh() {
-    if (signalAllocationsDisabled) {
-      return null;
-    }
-
     const geometry = new THREE.BufferGeometry();
-    try {
-      geometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.maxTrail * 3), 3)
-      );
-      geometry.setAttribute(
-        "color",
-        new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.maxTrail * 3), 3)
-      );
-    } catch (error) {
-      signalAllocationsDisabled = true;
-      geometry.dispose();
-      if (DEBUG_HERO) {
-        console.error("[Hero][Tunnel] signal allocation failed, disabling signal meshes", error);
-      }
-      return null;
-    }
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(CONSTANTS.maxTrail * 3), 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(CONSTANTS.maxTrail * 3), 3));
 
     const mesh = new THREE.Line(geometry, signalMaterial);
     mesh.frustumCulled = false;
     mesh.renderOrder = 1;
     contentGroup.add(mesh);
+
     return mesh;
   }
 
-  function clearSignalGroup(groupState) {
+  function clearGroup(groupState) {
     groupState.signals.forEach((signal) => {
       contentGroup.remove(signal.mesh);
       signal.mesh.geometry.dispose();
@@ -240,143 +174,134 @@ export function initHeroTunnel({
   }
 
   function rebuildSignalGroup(groupState) {
-    clearSignalGroup(groupState);
+    clearGroup(groupState);
 
     if (!groupState.enabled) {
-      groupState.currentCount = 0;
       return;
     }
 
-    const targetCount = Math.max(
-      0,
-      Math.min(
-        TUNNEL_CONFIG.maxSignalMeshes,
-        Math.floor(groupState.count * TUNNEL_CONFIG.signalDensity)
-      )
-    );
-
+    const targetCount = Math.max(0, Math.floor(groupState.count));
     for (let i = 0; i < targetCount; i += 1) {
-      const mesh = createSignalMesh();
-      if (!mesh) {
-        break;
-      }
       groupState.signals.push({
-        mesh,
-        laneIndex: Math.floor(Math.random() * TUNNEL_CONFIG.lineCount),
+        mesh: createSignalMesh(),
+        laneIndex: Math.floor(Math.random() * Math.max(params.lineCount, 1)),
         speed: 0.2 + Math.random() * 0.5,
         progress: Math.random(),
         history: [],
         assignedColor: new THREE.Color(groupState.color),
       });
     }
-    groupState.currentCount = targetCount;
   }
 
   function rebuildAllSignalGroups() {
     signalGroups.forEach((groupState) => rebuildSignalGroup(groupState));
   }
 
+  function syncSignalColorsFromParams() {
+    signalGroups.forEach((groupState) => {
+      groupState.color = params[groupState.colorKey];
+      groupState.signals.forEach((signal) => {
+        signal.assignedColor.set(groupState.color);
+      });
+    });
+  }
+
+  function initSignalGroups() {
+    signalGroups = DEFAULT_SIGNAL_GROUPS.map((entry) => ({
+      ...entry,
+      color: params[entry.colorKey],
+      signals: [],
+    }));
+  }
+
   function rebuildLines() {
-    lines.forEach((line) => {
+    backgroundLines.forEach((line) => {
       contentGroup.remove(line);
       line.geometry.dispose();
     });
-    lines = [];
+    backgroundLines = [];
 
-    for (let i = 0; i < TUNNEL_CONFIG.lineCount; i += 1) {
+    for (let i = 0; i < params.lineCount; i += 1) {
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute(
         "position",
-        new THREE.BufferAttribute(new Float32Array(TUNNEL_CONFIG.segmentCount * 3), 3)
+        new THREE.BufferAttribute(new Float32Array(CONSTANTS.segmentCount * 3), 3)
       );
       const line = new THREE.Line(geometry, bgMaterial);
       line.userData = { id: i };
       line.renderOrder = 0;
       contentGroup.add(line);
-      lines.push(line);
+      backgroundLines.push(line);
     }
 
     rebuildAllSignalGroups();
   }
 
-  function initSignalGroups() {
-    signalGroups = SIGNAL_GROUP_CONFIG.map((entry) => ({
-      ...entry,
-      currentCount: 0,
-      runtimeSpeed: entry.speed,
-      signals: [],
-    }));
-  }
+  function applyProgressToParams(progress) {
+    const p = clamp(progress, 0, 1);
+    // Scroll-driven modulation while keeping all GUI controls available.
+    const speedScale = 0.35 + p * 1.5;
+    const glowScale = 0.6 + p * 0.9;
+    const convergeScale = 1 - p * 0.65;
+    const spreadScale = 0.65 + p * 0.6;
 
-  function applyProgressEnergy() {
-    const p = localProgress;
-    const speedScale = 0.45 + p * 1.35;
-    const waveScale = 0.35 + p * 1.25;
-    const densityScale = 0.2 + p * 1.35;
-    const trailScale = 0.45 + p * 1.2;
-
-    TUNNEL_CONFIG.signalDensity = densityScale;
-    activeSignalRatio = signalAllocationsDisabled ? 0 : clamp(densityScale, 0.15, 1);
-    bgMaterial.opacity = visibleAmount * (0.18 + p * 0.45);
-    TUNNEL_CONFIG.waveHeight = 0.08 * waveScale;
-    runtimeTrailLength = Math.max(1, Math.floor(3 * trailScale));
+    if (bloomPass) {
+      bloomPass.strength = params.bloomStrength * glowScale;
+      bloomPass.radius = params.bloomRadius;
+      bloomPass.threshold = params.bloomThreshold;
+    }
 
     signalGroups.forEach((groupState) => {
       groupState.runtimeSpeed = groupState.speed * speedScale;
     });
+
+    params.runtimeConvergeWidth = Math.max(0.05, params.convergeWidth * convergeScale);
+    params.runtimeSpreadHeight = params.spreadHeight * spreadScale;
   }
 
-  function updateBackgroundLines(time) {
-    lines.forEach((line) => {
+  function updateLinesAndSignals() {
+    backgroundLines.forEach((line) => {
       const positions = line.geometry.attributes.position.array;
       const lineId = line.userData.id;
 
-      for (let j = 0; j < TUNNEL_CONFIG.segmentCount; j += 1) {
-        const t = j / (TUNNEL_CONFIG.segmentCount - 1);
-        const vec = getPathPoint(THREE, t, lineId, time, TUNNEL_CONFIG);
+      for (let j = 0; j < CONSTANTS.segmentCount; j += 1) {
+        const t = j / (CONSTANTS.segmentCount - 1);
+        const vec = getPathPoint(THREE, t, lineId, scrollTime, {
+          ...params,
+          convergeWidth: params.runtimeConvergeWidth ?? params.convergeWidth,
+          spreadHeight: params.runtimeSpreadHeight ?? params.spreadHeight,
+        });
         positions[j * 3] = vec.x;
         positions[j * 3 + 1] = vec.y;
         positions[j * 3 + 2] = vec.z;
       }
+
       line.geometry.attributes.position.needsUpdate = true;
     });
-  }
 
-  function updateSignals(time, dt) {
     signalGroups.forEach((groupState) => {
       if (!groupState.enabled || groupState.signals.length === 0) {
         return;
       }
 
-      const trailLength = Math.max(1, Math.floor(groupState.trailLength * (runtimeTrailLength / 3)));
+      const trailLength = Math.max(0, Math.floor(groupState.trailLength));
       const drawCount = Math.max(1, trailLength);
-      const activeCount = Math.max(
-        1,
-        Math.floor(groupState.signals.length * activeSignalRatio)
-      );
 
-      groupState.signals.forEach((signal, signalIndex) => {
-        if (signalIndex >= activeCount) {
-          signal.mesh.geometry.setDrawRange(0, 0);
-          return;
-        }
-
-        signal.progress += signal.speed * 0.6 * groupState.runtimeSpeed * dt;
+      groupState.signals.forEach((signal) => {
+        signal.progress += signal.speed * 0.005 * (groupState.runtimeSpeed || groupState.speed);
 
         if (signal.progress > 1.0) {
           signal.progress = 0;
-          signal.laneIndex = Math.floor(Math.random() * TUNNEL_CONFIG.lineCount);
+          signal.laneIndex = Math.floor(Math.random() * Math.max(params.lineCount, 1));
           signal.history = [];
           signal.assignedColor.set(groupState.color);
         }
 
-        const pos = getPathPoint(
-          THREE,
-          signal.progress,
-          signal.laneIndex,
-          time,
-          TUNNEL_CONFIG
-        );
+        const pos = getPathPoint(THREE, signal.progress, signal.laneIndex, scrollTime, {
+          ...params,
+          convergeWidth: params.runtimeConvergeWidth ?? params.convergeWidth,
+          spreadHeight: params.runtimeSpreadHeight ?? params.spreadHeight,
+        });
 
         signal.history.push(pos);
         if (signal.history.length > trailLength + 1) {
@@ -392,13 +317,13 @@ export function initHeroTunnel({
           if (index < 0) {
             index = 0;
           }
-
           const p = signal.history[index] || new THREE.Vector3();
+
           positions[i * 3] = p.x;
           positions[i * 3 + 1] = p.y;
           positions[i * 3 + 2] = p.z;
 
-          const alpha = Math.max(0, 1 - i / trailLength);
+          const alpha = trailLength > 0 ? Math.max(0, 1 - i / trailLength) : 1;
           colors[i * 3] = signal.assignedColor.r * alpha;
           colors[i * 3 + 1] = signal.assignedColor.g * alpha;
           colors[i * 3 + 2] = signal.assignedColor.b * alpha;
@@ -411,11 +336,102 @@ export function initHeroTunnel({
     });
   }
 
-  function applyTunnelPostFx() {
-    threeRoot.setPostFXPreset?.("tunnel", {
-      bloomStrength: TUNNEL_CONFIG.bloomStrength,
-      bloomRadius: TUNNEL_CONFIG.bloomRadius,
-      bloomThreshold: TUNNEL_CONFIG.bloomThreshold,
+  function setupComposer() {
+    if (!EffectComposer || !RenderPass || !UnrealBloomPass) {
+      return;
+    }
+
+    const width = Math.max(1, window.innerWidth || 1);
+    const height = Math.max(1, window.innerHeight || 1);
+
+    composer = new EffectComposer(threeRoot.renderer);
+    composer.addPass(new RenderPass(threeRoot.scene, threeRoot.camera));
+    bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(width, height),
+      params.bloomStrength,
+      params.bloomRadius,
+      params.bloomThreshold
+    );
+    bloomPass.threshold = params.bloomThreshold;
+    bloomPass.strength = params.bloomStrength;
+    bloomPass.radius = params.bloomRadius;
+    composer.addPass(bloomPass);
+  }
+
+  function setupGui() {
+    if (!isDebugEnabled() || !GUI || gui) {
+      return;
+    }
+
+    gui = new GUI({ title: "Data Tunnel" });
+
+    const folderColors = gui.addFolder("Colors");
+    folderColors.addColor(params, "colorBg").name("Background").onChange((v) => {
+      if (isVisible) {
+        threeRoot.scene.background = new THREE.Color(v);
+        threeRoot.scene.fog = new THREE.FogExp2(v, tunnelFogDensity);
+      }
+    });
+    folderColors.addColor(params, "colorLine").name("Lines").onChange((v) => bgMaterial.color.set(v));
+    folderColors.addColor(params, "color1").name("Color 1").onChange(syncSignalColorsFromParams);
+    folderColors.addColor(params, "color2").name("Color 2").onChange(syncSignalColorsFromParams);
+    folderColors.addColor(params, "color3").name("Color 3").onChange(syncSignalColorsFromParams);
+    folderColors.addColor(params, "color4").name("Color 4").onChange(syncSignalColorsFromParams);
+    folderColors.addColor(params, "color5").name("Color 5").onChange(syncSignalColorsFromParams);
+    folderColors.addColor(params, "color6").name("Color 6").onChange(syncSignalColorsFromParams);
+
+    const folderGeneral = gui.addFolder("General");
+    folderGeneral.add(params, "globalRotation", -180, 180).name("Rotation (Deg)").onChange((v) => {
+      contentGroup.rotation.z = THREE.MathUtils.degToRad(v);
+    });
+    folderGeneral.add(params, "positionX", -200, 200).name("Position X").onChange((v) => {
+      contentGroup.position.x = v;
+    });
+    folderGeneral.add(params, "positionY", -100, 100).name("Position Y").onChange((v) => {
+      contentGroup.position.y = v;
+    });
+    folderGeneral.add(params, "lineCount", 10, 300, 1).name("Line Count").onFinishChange((v) => {
+      params.lineCount = Math.floor(v);
+      rebuildLines();
+    });
+
+    const folderGeo = gui.addFolder("Geometry");
+    folderGeo.add(params, "spreadHeight", 0, 100).name("Spread Height");
+    folderGeo.add(params, "spreadDepth", 0, 50).name("Spread Depth");
+    folderGeo.add(params, "curveLength", 20, 150).name("Curve Length").onFinishChange(() => {
+      params.positionX = (params.curveLength - params.straightLength) / 2;
+      contentGroup.position.x = params.positionX;
+    });
+    folderGeo.add(params, "straightLength", 20, 200).name("Straight Length").onFinishChange(() => {
+      params.positionX = (params.curveLength - params.straightLength) / 2;
+      contentGroup.position.x = params.positionX;
+    });
+    folderGeo.add(params, "curvePower", 0.1, 3.0).name("Curve Power");
+    folderGeo.add(params, "convergeWidth", 0.0, 15.0).name("Converge Width");
+
+    const folderAnim = gui.addFolder("Lines");
+    folderAnim.add(params, "waveSpeed", 0, 5).name("Wave Speed");
+    folderAnim.add(params, "waveHeight", 0, 5).name("Wave Height");
+    folderAnim.add(params, "lineOpacity", 0, 1).name("Line Opacity").onChange((v) => {
+      bgMaterial.opacity = v;
+    });
+
+    const folderBloom = gui.addFolder("Bloom");
+    folderBloom.add(params, "bloomStrength", 0, 5).name("Strength");
+    folderBloom.add(params, "bloomRadius", 0, 1).name("Radius");
+    folderBloom.add(params, "bloomThreshold", 0, 1).name("Threshold");
+
+    const folderSlowmo = gui.addFolder("Slow-mo");
+    folderSlowmo.add(params, "slowmoScale", 0.01, 1.0).name("Hover scale");
+    folderSlowmo.add(params, "slowmoDuration", 0.05, 2.0).name("Tween duration");
+
+    const folderSignals = gui.addFolder("Signals (6 groups)");
+    signalGroups.forEach((groupState) => {
+      const folder = folderSignals.addFolder(groupState.name);
+      folder.add(groupState, "enabled").name("Enabled").onChange(() => rebuildSignalGroup(groupState));
+      folder.add(groupState, "count", 0, 200, 1).name("Count").onFinishChange(() => rebuildSignalGroup(groupState));
+      folder.add(groupState, "speed", 0, 3, 0.001).name("Speed");
+      folder.add(groupState, "trailLength", 0, 100, 1).name("Trail Length");
     });
   }
 
@@ -429,78 +445,37 @@ export function initHeroTunnel({
       console.log("[Hero][Tunnel] init");
     }
 
+    group.position.set(0, 0, 0);
+    contentGroup.position.set(params.positionX, params.positionY, 0);
+    contentGroup.rotation.z = THREE.MathUtils.degToRad(params.globalRotation);
+
     initSignalGroups();
     rebuildLines();
+    syncSignalColorsFromParams();
+    setupComposer();
+    setupGui();
 
     threeRoot.camera.position.set(0, 0, 90);
+    threeRoot.camera.lookAt(0, 0, 0);
     threeRoot.camera.near = 1;
     threeRoot.camera.far = 1000;
-    threeRoot.camera.lookAt(0, 0, 0);
     threeRoot.camera.updateProjectionMatrix();
 
-    group.rotation.z = 0;
-    contentGroup.position.x = (TUNNEL_CONFIG.curveLength - TUNNEL_CONFIG.straightLength) / 2;
     threeRoot.scene.add(group);
-
-    if (TUNNEL_CONFIG.debug && !debugUI) {
-      debugUI = createTunnelDebugUI(TUNNEL_CONFIG, {
-        onLineCount(value) {
-          TUNNEL_CONFIG.lineCount = Math.max(10, Math.floor(value));
-          rebuildLines();
-        },
-        onSpreadHeight(value) {
-          TUNNEL_CONFIG.spreadHeight = value;
-        },
-        onWaveSpeed(value) {
-          TUNNEL_CONFIG.waveSpeed = value;
-        },
-        onWaveHeight(value) {
-          TUNNEL_CONFIG.waveHeight = value;
-        },
-        onSignalDensity(value) {
-          TUNNEL_CONFIG.signalDensity = value;
-          rebuildAllSignalGroups();
-        },
-        onTrailLength(value) {
-          runtimeTrailLength = Math.max(1, Math.floor(value));
-          signalGroups.forEach((groupState) => {
-            groupState.trailLength = runtimeTrailLength;
-          });
-        },
-        onBloomStrength(value) {
-          TUNNEL_CONFIG.bloomStrength = value;
-          applyTunnelPostFx();
-        },
-        onBloomRadius(value) {
-          TUNNEL_CONFIG.bloomRadius = value;
-          applyTunnelPostFx();
-        },
-        onBloomThreshold(value) {
-          TUNNEL_CONFIG.bloomThreshold = value;
-          applyTunnelPostFx();
-        },
-      });
-    }
   }
 
   function update(progress) {
     const p = clamp(progress, 0, 1);
     localProgress = p;
     cues.update(p);
-    applyProgressEnergy();
-  }
 
-  function tick() {
-    if (!initialized || !group.visible) {
-      return;
-    }
+    const deltaProgress = p - previousProgress;
+    previousProgress = p;
 
-    const now = performance.now() * 0.001;
-    const dt = Math.min(0.05, Math.max(0.001, now - lastTickTime));
-    lastTickTime = now;
-
-    updateBackgroundLines(now);
-    updateSignals(now, dt);
+    const baseTimeScale = THREE.MathUtils.lerp(0.5, 2.4, p);
+    scrollTime += deltaProgress * 120 * baseTimeScale;
+    applyProgressToParams(p);
+    updateLinesAndSignals();
   }
 
   function show() {
@@ -508,40 +483,58 @@ export function initHeroTunnel({
       console.log("[Hero][Tunnel] show");
     }
     group.visible = true;
-    visibleAmount = 1;
-    applyTunnelPostFx();
+    isVisible = true;
+    threeRoot.scene.background = new THREE.Color(params.colorBg);
+    threeRoot.scene.fog = new THREE.FogExp2(params.colorBg, tunnelFogDensity);
   }
 
   function hide() {
     if (DEBUG_HERO) {
       console.log("[Hero][Tunnel] hide");
     }
-    visibleAmount = 0;
     group.visible = false;
-    threeRoot.clearPostFXPreset?.();
+    isVisible = false;
+    threeRoot.scene.background = null;
+    threeRoot.scene.fog = null;
+  }
+
+  function resize(width, height) {
+    if (composer) {
+      composer.setSize(Math.max(1, width), Math.max(1, height));
+    }
+  }
+
+  function render() {
+    if (!isVisible || !composer) {
+      return false;
+    }
+    composer.render();
+    return true;
   }
 
   function destroy() {
     cues.destroy();
-    if (!initialized) {
-      return;
-    }
 
-    lines.forEach((line) => {
+    backgroundLines.forEach((line) => {
       contentGroup.remove(line);
       line.geometry.dispose();
     });
-    lines = [];
+    backgroundLines = [];
 
-    signalGroups.forEach((groupState) => clearSignalGroup(groupState));
+    signalGroups.forEach((groupState) => clearGroup(groupState));
     signalGroups = [];
 
     bgMaterial.dispose();
     signalMaterial.dispose();
 
-    if (debugUI) {
-      debugUI.destroy();
-      debugUI = null;
+    if (gui) {
+      gui.destroy();
+      gui = null;
+    }
+
+    if (composer) {
+      composer = null;
+      bloomPass = null;
     }
 
     if (group.parent) {
@@ -552,10 +545,11 @@ export function initHeroTunnel({
   return {
     init,
     update,
-    tick,
     show,
     hide,
-    resize() {},
+    resize,
+    tick() {},
+    render,
     destroy,
     get initialized() {
       return initialized;

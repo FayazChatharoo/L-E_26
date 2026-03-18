@@ -1,49 +1,33 @@
 const DEBUG_HERO = true;
 
 const HERO_THREE_VERSION = "0.171.0";
-const CDN_BASE = `https://cdn.jsdelivr.net/npm/three@${HERO_THREE_VERSION}`;
 const ESM_BASE = `https://esm.sh/three@${HERO_THREE_VERSION}`;
+
+let depsPromise = null;
+let selectedBackend = null;
+let moduleSpecsPromise = null;
 
 function getModuleSpecs(useBareSpecifiers) {
   if (useBareSpecifiers) {
     return {
       three: ["three"],
-      webgpu: ["three/webgpu"],
-      tsl: ["three/tsl"],
-      webgpuCap: ["three/addons/capabilities/WebGPU.js"],
       gltfLoader: ["three/addons/loaders/GLTFLoader.js"],
-      meshSurfaceSampler: ["three/addons/math/MeshSurfaceSampler.js"],
-      fxaaNode: ["three/addons/tsl/display/FXAANode.js"],
-      bloomNode: ["three/addons/tsl/display/BloomNode.js"],
       effectComposer: ["three/addons/postprocessing/EffectComposer.js"],
       renderPass: ["three/addons/postprocessing/RenderPass.js"],
       unrealBloomPass: ["three/addons/postprocessing/UnrealBloomPass.js"],
+      gui: ["lil-gui", "https://esm.sh/lil-gui@0.19.2"],
     };
   }
 
   return {
     three: [`${ESM_BASE}`],
-    webgpu: [`${ESM_BASE}/webgpu`],
-    tsl: [`${ESM_BASE}/tsl`],
-    webgpuCap: [`${ESM_BASE}/examples/jsm/capabilities/WebGPU.js`],
     gltfLoader: [`${ESM_BASE}/examples/jsm/loaders/GLTFLoader.js`],
-    meshSurfaceSampler: [`${ESM_BASE}/examples/jsm/math/MeshSurfaceSampler.js`],
-    fxaaNode: [`${ESM_BASE}/examples/jsm/tsl/display/FXAANode.js`],
-    bloomNode: [`${ESM_BASE}/examples/jsm/tsl/display/BloomNode.js`],
     effectComposer: [`${ESM_BASE}/examples/jsm/postprocessing/EffectComposer.js`],
     renderPass: [`${ESM_BASE}/examples/jsm/postprocessing/RenderPass.js`],
     unrealBloomPass: [`${ESM_BASE}/examples/jsm/postprocessing/UnrealBloomPass.js`],
+    gui: ["https://esm.sh/lil-gui@0.19.2"],
   };
 }
-
-const BACKEND = {
-  WEBGPU: "webgpu",
-  WEBGL: "webgl",
-};
-
-let depsPromise = null;
-let selectedBackend = null;
-let moduleSpecsPromise = null;
 
 async function importFirst(specifiers) {
   let lastError = null;
@@ -81,112 +65,18 @@ function normalizeModule(mod) {
   return mod?.default || mod;
 }
 
-function resolveWebGPURendererCtor(webgpuModule, threeModule) {
-  return (
-    webgpuModule?.default ||
-    webgpuModule?.WebGPURenderer ||
-    (typeof webgpuModule === "function" ? webgpuModule : null) ||
-    webgpuModule?.default?.WebGPURenderer ||
-    threeModule?.WebGPURenderer ||
-    null
-  );
-}
-
-async function webgpuPreflight({ THREE, WEBGPU, rendererCtor }) {
-  if (!rendererCtor) {
-    throw new Error("WebGPURenderer is unavailable");
+function logDepsState() {
+  if (!DEBUG_HERO) {
+    return;
   }
 
-  const canvas = document.createElement("canvas");
-  let renderer = null;
-  function safeDisposeRenderer() {
-    try {
-      if (renderer && typeof renderer.setAnimationLoop === "function") {
-        renderer.setAnimationLoop(null);
-      }
-    } catch (disposeError) {
-      // Ignore cleanup errors in preflight; they should not block backend selection.
-    }
-  }
-
-  try {
-    renderer = new rendererCtor({ canvas, alpha: true, antialias: true });
-
-    if (typeof renderer.init === "function") {
-      await renderer.init();
-    }
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 10);
-    camera.position.z = 3;
-
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshNormalMaterial()
-    );
-    scene.add(mesh);
-
-    renderer.setPixelRatio(1);
-    renderer.setSize(2, 2, false);
-    renderer.render(scene, camera);
-
-    mesh.geometry.dispose();
-    mesh.material.dispose();
-
-    safeDisposeRenderer();
-  } catch (error) {
-    safeDisposeRenderer();
-    throw error;
-  }
-}
-
-async function loadWebGPUDeps() {
-  const specs = await resolveModuleSpecs();
-  const threeMod = await importFirst(specs.three);
-  const webgpuMod = await importFirst(specs.webgpu);
-  const tslMod = await importFirst(specs.tsl);
-  const capMod = await importFirst(specs.webgpuCap);
-  const gltfMod = await importFirst(specs.gltfLoader);
-  const samplerMod = await importFirst(specs.meshSurfaceSampler);
-  const fxaaMod = await importFirst(specs.fxaaNode);
-  const bloomMod = await importFirst(specs.bloomNode);
-
-  const THREE = normalizeModule(threeMod);
-  const WEBGPU = normalizeModule(webgpuMod);
-  const TSL = normalizeModule(tslMod);
-  const capModule = normalizeModule(capMod);
-
-  const isAvailable =
-    (typeof capModule?.isAvailable === "function" && capModule.isAvailable()) ||
-    Boolean(navigator.gpu);
-
-  if (!isAvailable) {
-    throw new Error("webgpu-unavailable");
-  }
-
-  const rendererCtor = resolveWebGPURendererCtor(webgpuMod, THREE);
-  await webgpuPreflight({ THREE, WEBGPU, rendererCtor });
-
-  window.HeroThree = {
-    backend: BACKEND.WEBGPU,
-    THREE,
-    WEBGPU,
-    TSL,
-    rawWebGPUModule: webgpuMod,
-    rawTSLModule: tslMod,
-    WebGPURenderer: rendererCtor,
-    GLTFLoader: gltfMod.GLTFLoader,
-    MeshSurfaceSampler: samplerMod.MeshSurfaceSampler,
-    fxaa: fxaaMod.fxaa,
-    BloomNode: bloomMod.default || bloomMod.BloomNode || null,
-    bloom: bloomMod.bloom || null,
-  };
-
-  // Keep legacy globals while migrating modules.
-  window.THREE = window.THREE || THREE;
-  window.GLTFLoader = window.GLTFLoader || gltfMod.GLTFLoader;
-
-  return BACKEND.WEBGPU;
+  console.groupCollapsed("[Hero] ThreeDeps");
+  console.log("[Hero][RenderBackend]", "webgl");
+  console.log("[Hero][ThreeDeps] THREE:", Boolean(window.HeroThree?.THREE));
+  console.log("[Hero][ThreeDeps] GLTFLoader:", Boolean(window.HeroThree?.GLTFLoader));
+  console.log("[Hero][ThreeDeps] EffectComposer:", Boolean(window.HeroThree?.EffectComposer));
+  console.log("[Hero][ThreeDeps] GUI:", Boolean(window.HeroThree?.GUI));
+  console.groupEnd();
 }
 
 async function loadWebGLDeps() {
@@ -196,17 +86,20 @@ async function loadWebGLDeps() {
   const composerMod = await importFirst(specs.effectComposer);
   const passMod = await importFirst(specs.renderPass);
   const bloomMod = await importFirst(specs.unrealBloomPass);
+  const guiMod = await importFirst(specs.gui);
 
   const THREE = normalizeModule(threeMod);
+  const GUI = guiMod.GUI || guiMod.default || null;
 
   window.HeroThree = {
-    backend: BACKEND.WEBGL,
+    backend: "webgl",
     THREE,
     WebGLRenderer: THREE.WebGLRenderer,
     GLTFLoader: gltfMod.GLTFLoader,
     EffectComposer: composerMod.EffectComposer,
     RenderPass: passMod.RenderPass,
     UnrealBloomPass: bloomMod.UnrealBloomPass,
+    GUI,
   };
 
   window.THREE = window.THREE || THREE;
@@ -215,34 +108,14 @@ async function loadWebGLDeps() {
   window.RenderPass = window.RenderPass || passMod.RenderPass;
   window.UnrealBloomPass = window.UnrealBloomPass || bloomMod.UnrealBloomPass;
 
-  return BACKEND.WEBGL;
-}
-
-function logDepsState(backend, extra = {}) {
-  if (!DEBUG_HERO) {
-    return;
-  }
-
-  console.groupCollapsed("[Hero] ThreeDeps");
-  console.log("[Hero][RenderBackend]", backend);
-  console.log("[Hero][ThreeDeps] THREE:", Boolean(window.HeroThree?.THREE));
-  console.log("[Hero][ThreeDeps] GLTFLoader:", Boolean(window.HeroThree?.GLTFLoader));
-  Object.entries(extra).forEach(([label, value]) => {
-    console.log(`[Hero][ThreeDeps] ${label}:`, value);
-  });
-  console.groupEnd();
+  return "webgl";
 }
 
 export function getSelectedHeroRenderBackend() {
   return selectedBackend;
 }
 
-export async function ensureHeroThreeDeps(options = {}) {
-  const {
-    preferredBackend = "auto",
-    allowFallback = true,
-  } = options;
-
+export async function ensureHeroThreeDeps() {
   if (selectedBackend) {
     return { ready: true, backend: selectedBackend };
   }
@@ -252,37 +125,10 @@ export async function ensureHeroThreeDeps(options = {}) {
   }
 
   depsPromise = (async () => {
-    const tryWebGPU = preferredBackend !== BACKEND.WEBGL;
-
-    if (tryWebGPU) {
-      try {
-        const backend = await loadWebGPUDeps();
-        selectedBackend = backend;
-        logDepsState(backend, {
-          "WebGPU available": true,
-        });
-        return { ready: true, backend };
-      } catch (error) {
-        if (DEBUG_HERO) {
-          console.warn("[Hero][RenderBackend] webgpu-unavailable", error);
-        }
-
-        if (!allowFallback && preferredBackend === BACKEND.WEBGPU) {
-          return { ready: false, backend: null, error };
-        }
-      }
-    }
-
-    if (!allowFallback && preferredBackend === BACKEND.WEBGPU) {
-      return { ready: false, backend: null };
-    }
-
     try {
       const backend = await loadWebGLDeps();
       selectedBackend = backend;
-      logDepsState(backend, {
-        "WebGPU available": Boolean(navigator.gpu),
-      });
+      logDepsState();
       return { ready: true, backend };
     } catch (error) {
       if (DEBUG_HERO) {
@@ -293,7 +139,6 @@ export async function ensureHeroThreeDeps(options = {}) {
   })();
 
   const result = await depsPromise;
-
   if (!result?.ready) {
     depsPromise = null;
   }

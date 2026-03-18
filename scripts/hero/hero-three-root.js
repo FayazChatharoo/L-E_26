@@ -12,59 +12,20 @@ function getSafePixelRatio(width, height, requestedDpr) {
   return Math.max(0.5, Math.min(requestedDpr, dprLimit, 2));
 }
 
-function resolveRendererConfig() {
+export function initHeroThreeRoot({ mountEl } = {}) {
   const heroThree = window.HeroThree || {};
   const THREE = heroThree.THREE || window.THREE;
-  const backend = heroThree.backend || "webgl";
-
-  if (!THREE) {
-    return null;
-  }
-
-  if (backend === "webgpu") {
-    const RendererCtor =
-      heroThree.WebGPURenderer ||
-      heroThree.WEBGPU?.WebGPURenderer ||
-      heroThree.THREE?.WebGPURenderer ||
-      null;
-
-    return {
-      backend,
-      THREE,
-      RendererCtor,
-      asyncInit: true,
-    };
-  }
-
-  return {
-    backend: "webgl",
-    THREE,
-    RendererCtor: heroThree.WebGLRenderer || THREE.WebGLRenderer,
-    asyncInit: false,
-  };
-}
-
-export function initHeroThreeRoot({ mountEl } = {}) {
-  const config = resolveRendererConfig();
-  const heroThree = window.HeroThree || {};
-  const WEBGPU = {
-    ...(heroThree.rawWebGPUModule || {}),
-    ...(heroThree.WEBGPU || {}),
-  };
-  const TSL = {
-    ...(heroThree.rawTSLModule || {}),
-    ...(heroThree.TSL || {}),
-  };
+  const RendererCtor = heroThree.WebGLRenderer || THREE?.WebGLRenderer;
 
   if (DEBUG_HERO) {
     console.groupCollapsed("[Hero] ThreeRoot Init");
-    console.log("[Hero][ThreeRoot] backend:", config?.backend || "missing");
-    console.log("[Hero][ThreeRoot] THREE available:", Boolean(config?.THREE));
+    console.log("[Hero][ThreeRoot] backend:", "webgl");
+    console.log("[Hero][ThreeRoot] THREE available:", Boolean(THREE));
     console.log("[Hero][ThreeRoot] mount element:", mountEl || null);
     console.groupEnd();
   }
 
-  if (!config?.THREE || !mountEl || !config.RendererCtor) {
+  if (!THREE || !mountEl || !RendererCtor) {
     if (DEBUG_HERO) {
       console.error("[Hero][ThreeRoot] renderer setup unavailable — aborting init");
     }
@@ -79,20 +40,14 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     };
   }
 
-  const THREE = config.THREE;
-
   let isDestroyed = false;
   let isReady = false;
   let activeScene = null;
   let rafId = 0;
   let hasRenderError = false;
-  let postProcessing = null;
-  let bloomPass = null;
-  let activePostFXPreset = null;
-  let postFXBusy = false;
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
   camera.position.set(0, 0, 4);
   camera.lookAt(0, 0, 0);
 
@@ -104,74 +59,11 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     1,
     Math.min(mountEl.clientHeight || window.innerHeight || 1, window.innerHeight || 1)
   );
-  const initialDpr = getSafePixelRatio(
-    initialWidth,
-    initialHeight,
-    window.devicePixelRatio || 1
-  );
+  const initialDpr = getSafePixelRatio(initialWidth, initialHeight, window.devicePixelRatio || 1);
 
-  const renderer = new config.RendererCtor({ alpha: true, antialias: true });
+  const renderer = new RendererCtor({ alpha: true, antialias: true });
   renderer.setPixelRatio(initialDpr);
   renderer.setSize(initialWidth, initialHeight);
-
-  function buildPostProcessing() {
-    if (config.backend !== "webgpu") {
-      return;
-    }
-
-    const PostProcessing = WEBGPU?.PostProcessing || null;
-    const fxaa = heroThree?.fxaa || null;
-    const bloom = heroThree?.bloom || null;
-    const pass = TSL?.pass || null;
-    const mrt = TSL?.mrt || null;
-    const output = TSL?.output || null;
-    const emissive = TSL?.emissive || null;
-    const renderOutput = TSL?.renderOutput || null;
-
-    if (!PostProcessing || !fxaa || !bloom || !pass || !mrt || !output || !emissive || !renderOutput) {
-      return;
-    }
-
-    try {
-      postProcessing = new PostProcessing(renderer);
-      postProcessing.outputColorTransform = false;
-
-      const scenePass = pass(scene, camera);
-      scenePass.setMRT(
-        mrt({
-          output,
-          emissive,
-        })
-      );
-
-      const outputPass = renderOutput(scenePass);
-      const fxaaPass = fxaa(outputPass);
-      bloomPass = bloom(scenePass.getTextureNode("emissive"), 1.5, 0.2, 0.1);
-      postProcessing.outputNode = fxaaPass.add(bloomPass);
-    } catch (error) {
-      postProcessing = null;
-      bloomPass = null;
-      if (DEBUG_HERO) {
-        console.warn("[Hero][ThreeRoot] postprocessing disabled", error);
-      }
-    }
-  }
-
-  function applyPostFXPreset() {
-    if (!bloomPass || !activePostFXPreset) {
-      return;
-    }
-
-    if (bloomPass.strength) {
-      bloomPass.strength.value = activePostFXPreset.bloomStrength;
-    }
-    if (bloomPass.radius) {
-      bloomPass.radius.value = activePostFXPreset.bloomRadius;
-    }
-    if (bloomPass.threshold) {
-      bloomPass.threshold.value = activePostFXPreset.bloomThreshold;
-    }
-  }
 
   function attachCanvas() {
     if (renderer.domElement && !mountEl.contains(renderer.domElement)) {
@@ -191,28 +83,21 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     if (isDestroyed || !isReady) {
       return;
     }
+
     try {
-      if (postProcessing && activePostFXPreset) {
-        if (typeof postProcessing.render === "function") {
-          postProcessing.render();
-        } else if (typeof postProcessing.renderAsync === "function") {
-          if (postFXBusy) {
-            return;
-          }
-          postFXBusy = true;
-          postProcessing.renderAsync().finally(() => {
-            postFXBusy = false;
-          });
-        } else {
-          renderer.render(scene, camera);
+      if (activeScene && typeof activeScene.render === "function") {
+        const handled = activeScene.render({ renderer, scene, camera });
+        if (handled) {
+          hasRenderError = false;
+          return;
         }
-      } else {
-        renderer.render(scene, camera);
       }
+
+      renderer.render(scene, camera);
       hasRenderError = false;
     } catch (error) {
       if (!hasRenderError && DEBUG_HERO) {
-        console.error("[Hero][ThreeRoot] render failed, attempting scene fallback", error);
+        console.error("[Hero][ThreeRoot] render failed", error);
       }
       hasRenderError = true;
       if (activeScene && typeof activeScene.onRenderError === "function") {
@@ -241,28 +126,9 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     rafId = window.requestAnimationFrame(tick);
   }
 
-  async function initializeRenderer() {
-    try {
-      if (typeof renderer.init === "function") {
-        await renderer.init();
-      }
-
-      if (isDestroyed) {
-        return;
-      }
-
-      buildPostProcessing();
-      attachCanvas();
-      isReady = true;
-      ensureLoop();
-    } catch (error) {
-      if (DEBUG_HERO) {
-        console.error("[Hero][ThreeRoot] renderer init failed", error);
-      }
-    }
-  }
-
-  void initializeRenderer();
+  attachCanvas();
+  isReady = true;
+  ensureLoop();
 
   function setActiveScene(nextScene) {
     if (activeScene === nextScene) {
@@ -295,7 +161,7 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     get isReady() {
       return isReady;
     },
-    backend: config.backend,
+    backend: "webgl",
     THREE,
     scene,
     camera,
@@ -303,16 +169,8 @@ export function initHeroThreeRoot({ mountEl } = {}) {
     setActiveScene,
     resize,
     render,
-    setPostFXPreset(name, preset) {
-      if (!name || !preset) {
-        return;
-      }
-      activePostFXPreset = preset;
-      applyPostFXPreset();
-    },
-    clearPostFXPreset() {
-      activePostFXPreset = null;
-    },
+    setPostFXPreset() {},
+    clearPostFXPreset() {},
     destroy() {
       if (isDestroyed) {
         return;
@@ -324,9 +182,6 @@ export function initHeroThreeRoot({ mountEl } = {}) {
         rafId = 0;
       }
 
-      if (typeof renderer.setAnimationLoop === "function") {
-        renderer.setAnimationLoop(null);
-      }
       if (typeof renderer.dispose === "function") {
         renderer.dispose();
       }

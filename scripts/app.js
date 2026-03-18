@@ -36,10 +36,7 @@ async function bootHero() {
 
   try {
     state.phase = "CHECK_SUPPORT";
-    const deps = await ensureHeroThreeDeps({
-      preferredBackend: "auto",
-      allowFallback: true,
-    });
+    const deps = await ensureHeroThreeDeps();
 
     if (!deps?.ready || !deps.backend) {
       if (DEBUG_HERO) {
