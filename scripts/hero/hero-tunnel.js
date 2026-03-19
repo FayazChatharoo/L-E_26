@@ -10,21 +10,21 @@ const CONSTANTS = {
 const DEFAULT_PARAMS = {
   colorBg: "#080808",
   colorLine: "#373f48",
-  lineCount: 80,
-  globalRotation: 0,
+  lineCount: 182,
+  globalRotation: 90,
   positionX: 0,
   positionY: 0,
-  spreadHeight: 30.33,
+  spreadHeight: 82.2,
   spreadDepth: 0,
-  curveLength: 50,
+  curveLength: 37.57,
   straightLength: 100,
   curvePower: 0.8265,
-  convergeWidth: 1.6,
-  waveSpeed: 2.48,
-  waveHeight: 0.145,
-  lineOpacity: 0.557,
-  bloomStrength: 3.0,
-  bloomRadius: 0.5,
+  convergeWidth: 0.12,
+  waveSpeed: 0.0,
+  waveHeight: 0.0,
+  lineOpacity: 0.268,
+  bloomStrength: 1.055,
+  bloomRadius: 0.784,
   bloomThreshold: 0.0,
   slowmoScale: 0.1,
   slowmoDuration: 0.55,
@@ -41,75 +41,87 @@ const DEFAULT_SIGNAL_GROUPS = [
     colorKey: "color1",
     name: "Color 1",
     enabled: true,
-    count: 94,
-    speed: 0.345,
-    trailLength: 3,
+    count: 61,
+    speed: 0.964,
+    trailLength: 17,
     speedInfluence: 0.15,
-    countInfluence: 18,
-    trailInfluence: 1.2,
+    countInfluence: 41,
+    trailInfluence: 22,
     presenceMode: "stable",
   },
   {
     colorKey: "color2",
     name: "Color 2",
     enabled: true,
-    count: 56,
-    speed: 0.35,
-    trailLength: 3,
-    speedInfluence: 0.85,
-    countInfluence: 42,
-    trailInfluence: 3.0,
+    count: 29,
+    speed: 0.841,
+    trailLength: 6,
+    speedInfluence: 1.15,
+    countInfluence: 95,
+    trailInfluence: 33,
     presenceMode: "reactive",
   },
   {
     colorKey: "color3",
     name: "Color 3",
     enabled: true,
-    count: 44,
-    speed: 0.33,
-    trailLength: 3,
-    speedInfluence: 0.5,
-    countInfluence: 30,
-    trailInfluence: 2.2,
+    count: 29,
+    speed: 0.434,
+    trailLength: 10,
+    speedInfluence: 1.35,
+    countInfluence: 87,
+    trailInfluence: 29,
     presenceMode: "mid",
   },
   {
     colorKey: "color4",
     name: "Color 4",
     enabled: true,
-    count: 40,
-    speed: 0.31,
-    trailLength: 3,
-    speedInfluence: 0.7,
-    countInfluence: 34,
-    trailInfluence: 2.4,
+    count: 0,
+    speed: 0.25,
+    trailLength: 6,
+    speedInfluence: 1.6,
+    countInfluence: 96,
+    trailInfluence: 34,
     presenceMode: "high",
   },
   {
     colorKey: "color5",
     name: "Color 5",
     enabled: true,
-    count: 52,
-    speed: 0.46,
-    trailLength: 3,
-    speedInfluence: 1.2,
-    countInfluence: 44,
-    trailInfluence: 3.6,
+    count: 0,
+    speed: 0.52,
+    trailLength: 8,
+    speedInfluence: 2.1,
+    countInfluence: 84,
+    trailInfluence: 31,
     presenceMode: "chaotic",
   },
   {
     colorKey: "color6",
     name: "Color 6",
     enabled: true,
-    count: 30,
+    count: 0,
     speed: 0.28,
-    trailLength: 3,
-    speedInfluence: 0.4,
-    countInfluence: 16,
-    trailInfluence: 1.8,
+    trailLength: 5,
+    speedInfluence: 0.85,
+    countInfluence: 52,
+    trailInfluence: 24,
     presenceMode: "accent",
   },
 ];
+
+const CINEMATIC_PHASES = {
+  startEnd: 0.2,
+  buildupEnd: 0.7,
+  baseMotion: { start: 0.75, mid: 2.2, end: 6.2 },
+  bloomStrength: { start: 1.055, mid: 2.4, end: 3.45 },
+  lineOpacity: { start: 0.268, mid: 0.45, end: 0.557 },
+  convergeWidth: { start: 0.18, mid: 0.1, end: 0.045 },
+  spreadHeight: { start: 72, mid: 82.2, end: 96 },
+  waveSpeed: { start: 0.12, mid: 1.5, end: 4.6 },
+  waveHeight: { start: 0.02, mid: 0.22, end: 0.42 },
+};
 
 function isDebugEnabled() {
   try {
@@ -147,6 +159,35 @@ function getPathPoint(THREE, t, lineIndex, time, params) {
   return new THREE.Vector3(currentX, y, z);
 }
 
+function phaseCurve(progress) {
+  const p = clamp(progress, 0, 1);
+
+  if (p <= CINEMATIC_PHASES.startEnd) {
+    const local = p / CINEMATIC_PHASES.startEnd;
+    return { phase: "start", eased: Math.pow(local, 1.2) };
+  }
+
+  if (p <= CINEMATIC_PHASES.buildupEnd) {
+    const local = (p - CINEMATIC_PHASES.startEnd) / (CINEMATIC_PHASES.buildupEnd - CINEMATIC_PHASES.startEnd);
+    return { phase: "buildup", eased: Math.pow(local, 2.15) };
+  }
+
+  const local = (p - CINEMATIC_PHASES.buildupEnd) / (1 - CINEMATIC_PHASES.buildupEnd);
+  return { phase: "final", eased: Math.pow(local, 3.0) };
+}
+
+function phaseLerp(THREE, progress, triplet) {
+  const { phase, eased } = phaseCurve(progress);
+
+  if (phase === "start") {
+    return THREE.MathUtils.lerp(triplet.start * 0.85, triplet.start, eased);
+  }
+  if (phase === "buildup") {
+    return THREE.MathUtils.lerp(triplet.start, triplet.mid, eased);
+  }
+  return THREE.MathUtils.lerp(triplet.mid, triplet.end, eased);
+}
+
 export function initHeroTunnel({
   threeRoot,
   cueScopeEl,
@@ -170,7 +211,7 @@ export function initHeroTunnel({
 
   const THREE = threeRoot.THREE;
   const params = { ...DEFAULT_PARAMS };
-  params.positionX = (params.curveLength - params.straightLength) / 2;
+  params.positionX = 0;
 
   const heroThree = window.HeroThree || {};
   const EffectComposer = heroThree.EffectComposer || window.EffectComposer || null;
@@ -189,7 +230,7 @@ export function initHeroTunnel({
   const tunnelFogDensity = 0.002;
 
   const contentGroup = new THREE.Group();
-  contentGroup.position.set(params.positionX, params.positionY, 0);
+  contentGroup.position.set(0, params.positionY, 0);
   group.add(contentGroup);
 
   const bgMaterial = new THREE.LineBasicMaterial({
@@ -269,7 +310,11 @@ export function initHeroTunnel({
       return;
     }
 
-    const targetCount = Math.max(0, Math.floor(groupState.count));
+    const poolCount = Math.max(
+      0,
+      Math.floor((groupState.baseCount ?? groupState.count) + (groupState.countInfluence || 0) * 2.2)
+    );
+    const targetCount = Math.max(poolCount, Math.floor(groupState.count));
     for (let i = 0; i < targetCount; i += 1) {
       groupState.signals.push({
         mesh: createSignalMesh(),
@@ -334,40 +379,47 @@ export function initHeroTunnel({
 
   function applyProgressToParams(progress) {
     const p = clamp(progress, 0, 1);
-    // Scroll-driven modulation while keeping all GUI controls available.
-    const glowScale = 0.6 + p * 0.9;
-    const convergeScale = 1 - p * 0.65;
-    const spreadScale = 0.65 + p * 0.6;
-    const waveSpeedScale = 0.55 + p * 1.35;
+    const { phase } = phaseCurve(p);
+    baseMotionSpeed = phaseLerp(THREE, p, CINEMATIC_PHASES.baseMotion);
 
-    baseMotionSpeed = THREE.MathUtils.lerp(0.85, 2.2, p);
+    params.runtimeWaveSpeed = phaseLerp(THREE, p, CINEMATIC_PHASES.waveSpeed);
+    params.runtimeWaveHeight = phaseLerp(THREE, p, CINEMATIC_PHASES.waveHeight);
+    params.runtimeConvergeWidth = phaseLerp(THREE, p, CINEMATIC_PHASES.convergeWidth);
+    params.runtimeSpreadHeight = phaseLerp(THREE, p, CINEMATIC_PHASES.spreadHeight);
+    params.runtimeLineOpacity = phaseLerp(THREE, p, CINEMATIC_PHASES.lineOpacity);
+    bgMaterial.opacity = params.runtimeLineOpacity;
 
     if (bloomPass) {
-      bloomPass.strength = params.bloomStrength * glowScale;
+      bloomPass.strength = phaseLerp(THREE, p, CINEMATIC_PHASES.bloomStrength);
       bloomPass.radius = params.bloomRadius;
       bloomPass.threshold = params.bloomThreshold;
     }
 
-    params.runtimeWaveSpeed = params.waveSpeed * waveSpeedScale;
     signalGroups.forEach((groupState) => {
       const presence = getPresenceFactor(groupState.presenceMode, p);
-      const baseSpeed = 0.7;
+      const baseSpeed = phase === "start" ? 0.62 : phase === "buildup" ? 0.95 : 1.35;
+      const speedPhaseBoost = phase === "final" ? 1.45 : 1;
+      const trailPhaseBoost = phase === "final" ? 1.65 : phase === "buildup" ? 1.25 : 1;
+      const countPhaseBoost = phase === "final" ? 1.85 : phase === "buildup" ? 1.35 : 1;
 
       groupState.runtimePresence = presence;
       groupState.runtimeSpeed =
-        groupState.speed * (baseSpeed + p * groupState.speedInfluence) * (0.65 + presence * 0.6);
+        groupState.speed *
+        (baseSpeed + Math.pow(p, 1.8) * groupState.speedInfluence) *
+        (0.65 + presence * 0.6) *
+        speedPhaseBoost;
       groupState.runtimeCount = Math.max(
         0,
-        Math.floor((groupState.baseCount + p * groupState.countInfluence) * presence)
+        Math.floor(
+          (groupState.baseCount + Math.pow(p, 2.1) * groupState.countInfluence * countPhaseBoost) *
+            presence
+        )
       );
       groupState.runtimeTrail = Math.max(
         1,
-        Math.floor(groupState.baseTrail + p * groupState.trailInfluence)
+        Math.floor(groupState.baseTrail + Math.pow(p, 1.9) * groupState.trailInfluence * trailPhaseBoost)
       );
     });
-
-    params.runtimeConvergeWidth = Math.max(0.05, params.convergeWidth * convergeScale);
-    params.runtimeSpreadHeight = params.spreadHeight * spreadScale;
   }
 
   function updateLinesAndSignals() {
@@ -379,6 +431,7 @@ export function initHeroTunnel({
         const t = j / (CONSTANTS.segmentCount - 1);
         const vec = getPathPoint(THREE, t, lineId, scrollTime, {
           ...params,
+          waveHeight: params.runtimeWaveHeight ?? params.waveHeight,
           convergeWidth: params.runtimeConvergeWidth ?? params.convergeWidth,
           spreadHeight: params.runtimeSpreadHeight ?? params.spreadHeight,
         });
@@ -420,6 +473,7 @@ export function initHeroTunnel({
         const pos = getPathPoint(THREE, signal.progress, signal.laneIndex, scrollTime, {
           ...params,
           waveSpeed: params.runtimeWaveSpeed ?? params.waveSpeed,
+          waveHeight: params.runtimeWaveHeight ?? params.waveHeight,
           convergeWidth: params.runtimeConvergeWidth ?? params.convergeWidth,
           spreadHeight: params.runtimeSpreadHeight ?? params.spreadHeight,
         });
@@ -519,14 +573,8 @@ export function initHeroTunnel({
     const folderGeo = gui.addFolder("Geometry");
     folderGeo.add(params, "spreadHeight", 0, 100).name("Spread Height");
     folderGeo.add(params, "spreadDepth", 0, 50).name("Spread Depth");
-    folderGeo.add(params, "curveLength", 20, 150).name("Curve Length").onFinishChange(() => {
-      params.positionX = (params.curveLength - params.straightLength) / 2;
-      contentGroup.position.x = params.positionX;
-    });
-    folderGeo.add(params, "straightLength", 20, 200).name("Straight Length").onFinishChange(() => {
-      params.positionX = (params.curveLength - params.straightLength) / 2;
-      contentGroup.position.x = params.positionX;
-    });
+    folderGeo.add(params, "curveLength", 20, 150).name("Curve Length");
+    folderGeo.add(params, "straightLength", 20, 200).name("Straight Length");
     folderGeo.add(params, "curvePower", 0.1, 3.0).name("Curve Power");
     folderGeo.add(params, "convergeWidth", 0.0, 15.0).name("Converge Width");
 
@@ -572,8 +620,8 @@ export function initHeroTunnel({
     }
 
     group.position.set(0, 0, 0);
-    contentGroup.position.set(params.positionX, params.positionY, 0);
-    contentGroup.rotation.z = THREE.MathUtils.degToRad(params.globalRotation);
+    contentGroup.position.set(0, params.positionY, 0);
+    contentGroup.rotation.z = THREE.MathUtils.degToRad(90);
 
     initSignalGroups();
     rebuildLines();
