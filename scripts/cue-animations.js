@@ -21,6 +21,12 @@
 const ORANGE = "#FF9D29";
 const WHITE = "#FFFFFF";
 
+function setCueVisibility(cueEl, isVisible) {
+  cueEl.setAttribute("data-hero-cue-visible", isVisible ? "true" : "false");
+  cueEl.style.visibility = isVisible ? "visible" : "hidden";
+  cueEl.style.pointerEvents = isVisible ? "" : "none";
+}
+
 function getSplitTargets({ cueEl, SplitText }) {
   // Use words (not characters) so each cue reveal finishes sooner.
   const splitInstance = SplitText ? new SplitText(cueEl, { type: "words" }) : null;
@@ -139,6 +145,7 @@ export function createCueAnimationState({
   const ease = cueEl.dataset.cueEase || "expo.inOut";
 
   setInitialState({ gsap, words, yOffset });
+  setCueVisibility(cueEl, false);
 
   if (cueType === "cue4") {
     gsap.set(words, {
@@ -174,6 +181,10 @@ export function createCueAnimationState({
     });
   }
 
+  timeline.eventCallback("onReverseComplete", () => {
+    setCueVisibility(cueEl, false);
+  });
+
   return {
     cueEl,
     cueType,
@@ -184,18 +195,21 @@ export function createCueAnimationState({
 }
 
 export function playDefaultCueAnimation(animationState) {
+  setCueVisibility(animationState.cueEl, true);
   // Enter animation speed.
   animationState.timeline.timeScale(1);
   animationState.timeline.play();
 }
 
 export function playSpecialCueAnimation(animationState) {
+  setCueVisibility(animationState.cueEl, true);
   // Enter animation speed.
   animationState.timeline.timeScale(1);
   animationState.timeline.play();
 }
 
 export function playCue4Animation(animationState) {
+  setCueVisibility(animationState.cueEl, true);
   // Enter animation speed.
   animationState.timeline.timeScale(1);
   animationState.timeline.play();
@@ -210,6 +224,7 @@ export function hideCueAnimation(animationState) {
 
 export function destroyCueAnimation(animationState, gsap = window.gsap) {
   animationState.timeline.kill();
+  setCueVisibility(animationState.cueEl, false);
   gsap.set(animationState.words, {
     clearProps: "opacity,transform,color,filter,scale,willChange",
   });

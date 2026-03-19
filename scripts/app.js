@@ -4,6 +4,26 @@ import { ensureHeroThreeDeps } from "./hero/hero-three-deps.js";
 
 let heroController = null;
 const DEBUG_HERO = true;
+const HERO_CUE_BASE_STYLE_ID = "hero-cue-base-style";
+
+function ensureHeroCueBaseStyles() {
+  if (document.getElementById(HERO_CUE_BASE_STYLE_ID)) {
+    return;
+  }
+
+  const styleEl = document.createElement("style");
+  styleEl.id = HERO_CUE_BASE_STYLE_ID;
+  styleEl.textContent = `
+[data-hero-cue]{
+  visibility:hidden !important;
+  pointer-events:none !important;
+}
+[data-hero-cue][data-hero-cue-visible="true"]{
+  visibility:visible !important;
+}
+`;
+  document.head.appendChild(styleEl);
+}
 
 function setBootCanvasVisibility(isHidden) {
   const roots = document.querySelectorAll("[data-hero-canvas-root]");
@@ -60,6 +80,8 @@ async function bootHero() {
 }
 
 async function boot() {
+  ensureHeroCueBaseStyles();
+
   const page = document.body?.dataset?.page;
 
   // Optional manual smoke page only. Do not hijack the hero flow.
