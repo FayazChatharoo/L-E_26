@@ -8,13 +8,13 @@ const CONSTANTS = {
 };
 
 const DEFAULT_PARAMS = {
-  colorBg: "#080808",
-  colorLine: "#373f48",
+  colorBg: "#03070D",
+  colorLine: "#666666",
   lineCount: 182,
   globalRotation: 90,
   positionX: 0,
   positionY: 0,
-  spreadHeight: 82.2,
+  spreadHeight: 100,
   spreadDepth: 0,
   curveLength: 37.57,
   straightLength: 100,
@@ -28,12 +28,12 @@ const DEFAULT_PARAMS = {
   bloomThreshold: 0.0,
   slowmoScale: 0.1,
   slowmoDuration: 0.55,
-  color1: "#8fc9ff",
-  color2: "#ff0055",
-  color3: "#ffcc00",
-  color4: "#00ffd5",
-  color5: "#a855ff",
-  color6: "#00ff66",
+  color1: "#00bfff",
+  color2: "#e68d29",
+  color3: "#a94301",
+  color4: "#c40fc7",
+  color5: "#a74972",
+  color6: "#e21dd1",
 };
 
 const DEFAULT_SIGNAL_GROUPS = [
@@ -227,7 +227,6 @@ export function initHeroTunnel({
 
   const group = new THREE.Group();
   group.visible = false;
-  const tunnelFogDensity = 0.002;
 
   const contentGroup = new THREE.Group();
   contentGroup.position.set(0, params.positionY, 0);
@@ -541,12 +540,7 @@ export function initHeroTunnel({
     gui = new GUI({ title: "Data Tunnel" });
 
     const folderColors = gui.addFolder("Colors");
-    folderColors.addColor(params, "colorBg").name("Background").onChange((v) => {
-      if (isVisible) {
-        threeRoot.scene.background = new THREE.Color(v);
-        threeRoot.scene.fog = new THREE.FogExp2(v, tunnelFogDensity);
-      }
-    });
+    folderColors.addColor(params, "colorBg").name("Background");
     folderColors.addColor(params, "colorLine").name("Lines").onChange((v) => bgMaterial.color.set(v));
     folderColors.addColor(params, "color1").name("Color 1").onChange(syncSignalColorsFromParams);
     folderColors.addColor(params, "color2").name("Color 2").onChange(syncSignalColorsFromParams);
@@ -652,8 +646,6 @@ export function initHeroTunnel({
     group.visible = true;
     isVisible = true;
     lastFrameTime = performance.now() * 0.001;
-    threeRoot.scene.background = new THREE.Color(params.colorBg);
-    threeRoot.scene.fog = new THREE.FogExp2(params.colorBg, tunnelFogDensity);
   }
 
   function hide() {
@@ -662,8 +654,6 @@ export function initHeroTunnel({
     }
     group.visible = false;
     isVisible = false;
-    threeRoot.scene.background = null;
-    threeRoot.scene.fog = null;
   }
 
   function resize(width, height) {

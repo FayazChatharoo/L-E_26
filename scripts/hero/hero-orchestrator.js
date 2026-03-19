@@ -13,6 +13,7 @@ const DEFAULT_CONFIG = {
   overlaySelector: '[data-hero-overlay="black"]',
   canvasRootSelector: "[data-hero-canvas-root]",
   scrollDistance: 5000,
+  holdMultiplier: 1.15,
   ranges: {
     video: [0.0, 0.6],
     tunnel: [0.6, 1.0],
@@ -142,8 +143,10 @@ export function initHeroOrchestrator(userConfig = {}) {
   const tunnelStageEl = rootEl.querySelector('[data-hero-stage="tunnel"]');
   const videoEl = rootEl.querySelector(config.videoSelector);
   const overlayEl = rootEl.querySelector(config.overlaySelector);
+  let backgroundLayerEl = rootEl.querySelector('[data-hero-bg="gradient"]');
 
   let sharedCanvasRootEl = rootEl.querySelector(config.canvasRootSelector);
+  let createdSharedCanvasRootEl = false;
   if (!sharedCanvasRootEl) {
     sharedCanvasRootEl = document.createElement("div");
     sharedCanvasRootEl.setAttribute("data-hero-canvas-root", "true");
@@ -152,11 +155,26 @@ export function initHeroOrchestrator(userConfig = {}) {
     sharedCanvasRootEl.style.zIndex = "2";
     sharedCanvasRootEl.style.pointerEvents = "none";
     rootEl.appendChild(sharedCanvasRootEl);
+    createdSharedCanvasRootEl = true;
+  }
+  let createdBackgroundLayerEl = false;
+  if (!backgroundLayerEl) {
+    backgroundLayerEl = document.createElement("div");
+    backgroundLayerEl.setAttribute("data-hero-bg", "gradient");
+    backgroundLayerEl.style.position = "absolute";
+    backgroundLayerEl.style.inset = "0";
+    backgroundLayerEl.style.zIndex = "0";
+    backgroundLayerEl.style.pointerEvents = "none";
+    backgroundLayerEl.style.background =
+      "linear-gradient(to bottom, #03070D 0%, #012340 100%)";
+    rootEl.appendChild(backgroundLayerEl);
+    createdBackgroundLayerEl = true;
   }
 
   if (DEBUG_HERO) {
     console.log("[Hero][DOM] videoEl:", videoEl ? "found" : "missing");
     console.log("[Hero][DOM] sharedCanvasRootEl:", sharedCanvasRootEl ? "found" : "missing");
+    console.log("[Hero][DOM] backgroundLayerEl:", backgroundLayerEl ? "found" : "missing");
     console.groupEnd();
   }
 
@@ -249,7 +267,9 @@ export function initHeroOrchestrator(userConfig = {}) {
   }
 
   function renderAtProgress(progress) {
-    const p = clamp(progress, 0, 1);
+    const holdMultiplier = Math.max(1, config.holdMultiplier || 1);
+    const extendedProgress = clamp(progress, 0, 1) * holdMultiplier;
+    const p = clamp(extendedProgress, 0, 1);
     const videoProgress = getStageProgress(p, config.ranges.video);
     const tunnelProgress = getStageProgress(p, config.ranges.tunnel);
     const nextStage = getCurrentStage(p, stageState.currentStage);
@@ -306,7 +326,7 @@ export function initHeroOrchestrator(userConfig = {}) {
   const trigger = globals.ScrollTrigger.create({
     trigger: rootEl,
     start: "top top",
-    end: `+=${config.scrollDistance}`,
+    end: `+=${Math.round(config.scrollDistance * Math.max(1, config.holdMultiplier || 1))}`,
     pin: true,
     scrub: 2,
     anticipatePin: 1,
@@ -337,6 +357,12 @@ export function initHeroOrchestrator(userConfig = {}) {
       if (sharedCanvasRootEl) {
         sharedCanvasRootEl.style.opacity = "";
         sharedCanvasRootEl.style.pointerEvents = "";
+      }
+      if (createdBackgroundLayerEl && backgroundLayerEl && backgroundLayerEl.parentNode) {
+        backgroundLayerEl.parentNode.removeChild(backgroundLayerEl);
+      }
+      if (createdSharedCanvasRootEl && sharedCanvasRootEl && sharedCanvasRootEl.parentNode) {
+        sharedCanvasRootEl.parentNode.removeChild(sharedCanvasRootEl);
       }
 
       stageEls.forEach((stageEl) => {
