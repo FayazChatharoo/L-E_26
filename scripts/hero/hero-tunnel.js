@@ -5,6 +5,8 @@ const DEBUG_HERO = true;
 const CONSTANTS = {
   segmentCount: 150,
   maxTrail: 150,
+  backgroundTop: "#03070D",
+  backgroundBottom: "#012340",
 };
 
 const DEFAULT_PARAMS = {
@@ -258,6 +260,34 @@ export function initHeroTunnel({
   let scrollTime = 0;
   let baseMotionSpeed = 1.1;
   let lastFrameTime = performance.now() * 0.001;
+  let gradientBackgroundTexture = null;
+  let previousSceneBackground = null;
+
+  function createBackgroundGradientTexture() {
+    if (gradientBackgroundTexture) {
+      return gradientBackgroundTexture;
+    }
+
+    const gradientCanvas = document.createElement("canvas");
+    gradientCanvas.width = 2;
+    gradientCanvas.height = 512;
+    const gradientCtx = gradientCanvas.getContext("2d");
+    if (!gradientCtx) {
+      return null;
+    }
+
+    const gradient = gradientCtx.createLinearGradient(0, 0, 0, gradientCanvas.height);
+    gradient.addColorStop(0, CONSTANTS.backgroundTop);
+    gradient.addColorStop(1, CONSTANTS.backgroundBottom);
+
+    gradientCtx.fillStyle = gradient;
+    gradientCtx.fillRect(0, 0, gradientCanvas.width, gradientCanvas.height);
+
+    gradientBackgroundTexture = new THREE.CanvasTexture(gradientCanvas);
+    gradientBackgroundTexture.needsUpdate = true;
+    gradientBackgroundTexture.colorSpace = THREE.SRGBColorSpace;
+    return gradientBackgroundTexture;
+  }
 
   function getPresenceFactor(mode, p) {
     if (mode === "stable") {
@@ -646,6 +676,11 @@ export function initHeroTunnel({
     group.visible = true;
     isVisible = true;
     lastFrameTime = performance.now() * 0.001;
+    previousSceneBackground = threeRoot.scene.background;
+    const texture = createBackgroundGradientTexture();
+    if (texture) {
+      threeRoot.scene.background = texture;
+    }
   }
 
   function hide() {
@@ -654,6 +689,8 @@ export function initHeroTunnel({
     }
     group.visible = false;
     isVisible = false;
+    threeRoot.scene.background = previousSceneBackground || null;
+    previousSceneBackground = null;
   }
 
   function resize(width, height) {
@@ -694,6 +731,12 @@ export function initHeroTunnel({
       composer = null;
       bloomPass = null;
     }
+
+    if (gradientBackgroundTexture) {
+      gradientBackgroundTexture.dispose();
+      gradientBackgroundTexture = null;
+    }
+    previousSceneBackground = null;
 
     if (group.parent) {
       group.parent.remove(group);

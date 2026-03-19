@@ -143,8 +143,6 @@ export function initHeroOrchestrator(userConfig = {}) {
   const tunnelStageEl = rootEl.querySelector('[data-hero-stage="tunnel"]');
   const videoEl = rootEl.querySelector(config.videoSelector);
   const overlayEl = rootEl.querySelector(config.overlaySelector);
-  let backgroundLayerEl = rootEl.querySelector('[data-hero-bg="gradient"]');
-
   let sharedCanvasRootEl = rootEl.querySelector(config.canvasRootSelector);
   let createdSharedCanvasRootEl = false;
   if (!sharedCanvasRootEl) {
@@ -157,24 +155,9 @@ export function initHeroOrchestrator(userConfig = {}) {
     rootEl.appendChild(sharedCanvasRootEl);
     createdSharedCanvasRootEl = true;
   }
-  let createdBackgroundLayerEl = false;
-  if (!backgroundLayerEl) {
-    backgroundLayerEl = document.createElement("div");
-    backgroundLayerEl.setAttribute("data-hero-bg", "gradient");
-    backgroundLayerEl.style.position = "absolute";
-    backgroundLayerEl.style.inset = "0";
-    backgroundLayerEl.style.zIndex = "0";
-    backgroundLayerEl.style.pointerEvents = "none";
-    backgroundLayerEl.style.background =
-      "linear-gradient(to bottom, #03070D 0%, #012340 100%)";
-    rootEl.appendChild(backgroundLayerEl);
-    createdBackgroundLayerEl = true;
-  }
-
   if (DEBUG_HERO) {
     console.log("[Hero][DOM] videoEl:", videoEl ? "found" : "missing");
     console.log("[Hero][DOM] sharedCanvasRootEl:", sharedCanvasRootEl ? "found" : "missing");
-    console.log("[Hero][DOM] backgroundLayerEl:", backgroundLayerEl ? "found" : "missing");
     console.groupEnd();
   }
 
@@ -357,9 +340,6 @@ export function initHeroOrchestrator(userConfig = {}) {
       if (sharedCanvasRootEl) {
         sharedCanvasRootEl.style.opacity = "";
         sharedCanvasRootEl.style.pointerEvents = "";
-      }
-      if (createdBackgroundLayerEl && backgroundLayerEl && backgroundLayerEl.parentNode) {
-        backgroundLayerEl.parentNode.removeChild(backgroundLayerEl);
       }
       if (createdSharedCanvasRootEl && sharedCanvasRootEl && sharedCanvasRootEl.parentNode) {
         sharedCanvasRootEl.parentNode.removeChild(sharedCanvasRootEl);
